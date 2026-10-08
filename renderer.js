@@ -370,6 +370,14 @@ async function runBatch() {
     render();
 }
 
+let toastTimer;
+function showExitToast(url) {
+    document.querySelector('.exit-toast')?.remove(); clearTimeout(toastTimer);
+    const toast = element('div', 'exit-toast'); toast.setAttribute('role', 'status');
+    toast.append(element('strong', '', 'Click captured'), element('span', '', url && url !== 'undefined' ? url : 'No URL supplied (clickTag is empty in the preview)'));
+    document.body.append(toast); toastTimer = setTimeout(() => toast.remove(), 4000);
+}
+
 function renderEvents() {
     const events = selected()?.events || [];
     $('runtime-count').textContent = `${events.length} event${events.length === 1 ? '' : 's'}`;
@@ -496,6 +504,7 @@ window.addEventListener('message', event => {
         item.status = 'fail';
         renderQueue(); renderInspector(); refreshIcons();
     } else renderEvents();
+    if (event.data.kind === 'exit') showExitToast(detail);
 });
 for (const name of ['dragenter', 'dragover']) $('dropzone').addEventListener(name, event => { event.preventDefault(); if (!state.running) $('dropzone').classList.add('drag-over'); });
 for (const name of ['dragleave', 'drop']) $('dropzone').addEventListener(name, event => { event.preventDefault(); $('dropzone').classList.remove('drag-over'); if (name === 'drop') addFiles(event.dataTransfer.files); });
