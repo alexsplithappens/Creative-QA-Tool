@@ -1,0 +1,86 @@
+{
+  "name": "sunshines-creative-qa-tool",
+  "version": "2.0.0",
+  "description": "Sunshine's Creative QA Tool - HTML5, Image, and Video QA",
+  "main": "main.js",
+  "scripts": {
+    "start": "npm run build:ui && electron .",
+    "build:ui": "esbuild renderer.js --bundle --platform=browser --outfile=assets/app.bundle.js --minify && esbuild qa-worker.js --bundle --platform=browser --outfile=assets/qa-worker.bundle.js --minify",
+    "test": "node --test tests/*.test.js",
+    "build": "npm run build:ui && electron-builder",
+    "build:win": "npm run build:ui && electron-builder --win"
+  },
+  "keywords": [
+    "qa",
+    "creative",
+    "html5",
+    "video",
+    "lufs"
+  ],
+  "author": "Alex Pearce",
+  "license": "MIT",
+  "build": {
+    "appId": "com.sunshine.creative-qa",
+    "productName": "Sunshine's Creative QA Tool",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "extraResources": [
+      {
+        "from": "ffmpeg",
+        "to": "ffmpeg",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "files": [
+      "**/*",
+      "!ffmpeg/**",
+      "!tests/**",
+      "!dist/**",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/*.d.ts",
+      "!**/node_modules/.bin",
+      "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
+      "!.editorconfig",
+      "!**/._*",
+      "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
+      "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
+      "!**/{appveyor.yml,.travis.yml,circle.yml}",
+      "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.64.0"
+  },
+  "dependencies": {
+    "acorn": "^8.19.0",
+    "acorn-walk": "^8.3.5",
+    "gifuct-js": "^2.1.2",
+    "jspdf": "^4.2.1",
+    "jszip": "^3.10.1",
+    "lucide": "^1.52.0",
+    "postcss": "^8.5.29",
+    "postcss-value-parser": "^4.2.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  }
+}

@@ -1,0 +1,258 @@
+const acorn = require('acorn');
+const walk = require('acorn-walk');
+const postcss = require('postcss');
+const { parseGIF } = require('gifuct-js');
+
+const LIMITS = { files: 1000, expandedBytes: 50 * 1024 * 1024, assetBytes: 500 * 1024 * 1024 };
+
+function result(label, status, detail, fix = '') {
+    return { label, status, detail, fix };
+}
+
+function statusFor(checks) {
+    if (checks.some(check => check.status === 'fail')) return 'fail';
+    if (checks.some(check => ['warning', 'unverified'].includes(check.status))) return 'review';
+    return 'pass';
+}
+
+function resolveReference(owner, reference) {
+    const value = reference.trim();
+    if (!value || value.startsWith('#') || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(value)) return null;
+    const segments = value.startsWith('/') ? [] : owner.split('/').slice(0, -1);
+    const decoded = decodeURIComponent(value.split(/[?#]/)[0]).replace(/\\/g, '/');
+    for (const segment of decoded.split('/')) {
+        if (!segment || segment === '.') continue;
+        if (segment === '..') {
+            if (!segments.length) throw new Error('Reference escapes the ZIP root');
+            segments.pop();
+        } else segments.push(segment);
+    }
+    return segments.join('/');
+}
+
+function memberName(node) {
+    if (!node) return '';
+    if (node.type === 'Identifier') return node.name;
+    if (node.type === 'MemberExpression') {
+        const property = node.computed ? node.property.value : node.property.name;
+        return `${memberName(node.object)}.${property}`;
+    }
+    return '';
+}
+
+function analyzeScripts(sources, mode = 'display', incomplete = false) {
+    const checks = [];
+    let declared = false;
+    let opener = false;
+    let studioExit = false;
+    let parseFailed = incomplete;
+    let gwdExit = false;
+    const storage = new Set();
+    const insecure = new Set();
+    for (const source of sources) {
+        let tree;
+        try {
+            tree = acorn.parse(source.content, { ecmaVersion: 'latest', sourceType: source.module ? 'module' : 'script', locations: true, allowReturnOutsideFunction: true });
+        } catch (error) {
+            parseFailed = true;
+            checks.push(result('JavaScript parsing', 'unverified', `${source.name}: ${error.message}`, 'Review the source and browser console.'));
+            continue;
+        }
+        walk.ancestor(tree, {
+            VariableDeclarator(node, ancestors) {
+                if (/^clickTag\d*$/i.test(node.id.name || '') && !source.module && !ancestors.some(parent => /Function/.test(parent.type)) && ancestors.at(-2).kind === 'var') declared = true;
+            },
+            AssignmentExpression(node) {
+                if (/^(?:window|globalThis)\.clickTag\d*$/i.test(memberName(node.left))) declared = true;
+                if (/^(?:(?:window|globalThis)\.)?location(?:\.href)?$/.test(memberName(node.left)) && containsClickTag(node.right)) opener = true;
+            },
+            CallExpression(node) {
+                const callee = memberName(node.callee);
+                if (/^(?:window\.)?open$/.test(callee) && node.arguments[0] && containsClickTag(node.arguments[0])) opener = true;
+                if (/^Enabler\.exit(?:Override)?$/.test(callee)) studioExit = true;
+                if (/^gwd\.actions\.gwd(?:GoogleAd|GenericAd)\.exit(?:Override)?$/.test(callee)) gwdExit = true;
+            },
+            MemberExpression(node) {
+                const name = memberName(node);
+                if (/(?:^|\.)(?:localStorage|sessionStorage|indexedDB|openDatabase)(?:\.|$)/.test(name)) storage.add(name);
+            },
+            Identifier(node) {
+                if (['localStorage', 'sessionStorage', 'indexedDB', 'openDatabase'].includes(node.name)) storage.add(node.name);
+            },
+            Literal(node) {
+                if (typeof node.value === 'string' && /^http:\/\//i.test(node.value)) insecure.add(node.value);
+            }
+        });
+    }
+    if (mode === 'studio' || (mode === 'auto' && studioExit && !(declared && opener))) {
+        checks.push(result('Studio exit', studioExit || gwdExit ? 'unverified' : (parseFailed ? 'unverified' : 'fail'), studioExit || gwdExit ? 'Supported exit API found. Activation and exit mapping require runtime review.' : 'No supported exit could be verified.', 'Verify the exit in Studio/CM360 preview; no untracked fallback is required.'));
+    } else {
+        const candidate = declared && opener || gwdExit;
+        checks.push(result('Click destination', candidate ? 'unverified' : (parseFailed ? 'unverified' : 'fail'), candidate ? 'Supported click destination found. User interaction still requires review.' : 'A supported click destination could not be verified.', candidate ? 'Verify the exit in the destination platform preview.' : 'Use the destination-supported clickTag or Google Web Designer exit implementation.'));
+    }
+    checks.push(result('Storage APIs', storage.size ? 'warning' : (parseFailed ? 'unverified' : 'pass'), storage.size ? `Storage references: ${[...storage].join(', ')}` : 'No storage API references found in parsed local scripts.', 'Check the destination policy and whether these APIs execute.'));
+    if (insecure.size) checks.push(result('HTTP strings', 'warning', [...insecure].join(', '), 'Confirm that fetched resources and landing destinations use HTTPS.'));
+    return checks;
+}
+
+function containsClickTag(node) {
+    let found = false;
+    walk.simple(node, {
+        Identifier(identifier) { if (/^clickTag\d*$/i.test(identifier.name)) found = true; },
+        MemberExpression(member) { if (/\.clickTag\d*$/i.test(memberName(member))) found = true; }
+    });
+    return found;
+}
+
+function seconds(value) {
+    const match = String(value).trim().match(/^(-?\d*\.?\d+)(ms|s)$/);
+    return match ? Number(match[1]) / (match[2] === 'ms' ? 1000 : 1) : null;
+}
+
+function analyzeAnimation(sources, limit) {
+    let longest = 0;
+    let unknown = false;
+    let infinite = false;
+    let found = false;
+    for (const source of sources) {
+        let tree;
+        try { tree = postcss.parse(source.content); } catch (_) { unknown = true; continue; }
+        tree.walkRules(rule => {
+            let durations = [0];
+            let delays = [0];
+            let iterations = [1];
+            rule.walkDecls(declaration => {
+                const property = declaration.prop.replace(/^-(webkit|moz)-/, '');
+                if (!property.startsWith('animation')) return;
+                found = true;
+                const values = postcss.list.comma(declaration.value);
+                if (/var\(|calc\(/.test(declaration.value)) unknown = true;
+                if (property === 'animation-duration') durations = values.map(seconds);
+                if (property === 'animation-delay') delays = values.map(seconds);
+                if (property === 'animation-iteration-count') iterations = values.map(value => value === 'infinite' ? Infinity : Number(value));
+                if (property === 'animation') {
+                    const parsed = values.map(value => {
+                        const tokens = postcss.list.space(value);
+                        const times = tokens.map(seconds).filter(time => time !== null);
+                        const count = tokens.find(token => token === 'infinite' || /^\d*\.?\d+$/.test(token));
+                        return { duration: times[0] || 0, delay: times[1] || 0, iterations: count === 'infinite' ? Infinity : Number(count || 1) };
+                    });
+                    durations = parsed.map(value => value.duration);
+                    delays = parsed.map(value => value.delay);
+                    iterations = parsed.map(value => value.iterations);
+                }
+            });
+            const count = Math.max(durations.length, delays.length, iterations.length);
+            for (let index = 0; index < count; index++) {
+                const duration = durations[index % durations.length];
+                const delay = delays[index % delays.length];
+                const repeat = iterations[index % iterations.length];
+                if (duration === null || delay === null || Number.isNaN(repeat)) { unknown = true; continue; }
+                if (repeat === Infinity && duration > 0) infinite = true;
+                longest = Math.max(longest, Math.max(0, delay + duration * repeat));
+            }
+        });
+    }
+    if (infinite) return result('CSS animation', limit ? 'fail' : 'warning', 'An infinite CSS animation was found.', 'Use a finite iteration count when required by delivery specs.');
+    if (limit && longest > limit) return result('CSS animation', 'fail', `Declared playback reaches ${longest.toFixed(2)}s; selected limit is ${limit}s.`, 'Reduce repetitions, duration, or delays.');
+    return result('Animation playback', 'unverified', `${found ? `Longest declared CSS playback: ${longest.toFixed(2)}s. ` : 'No CSS animation found. '}${unknown ? 'Some CSS could not be resolved. ' : ''}JavaScript, cascading styles, and final-frame behaviour require playback review.`);
+}
+
+function inspectGif(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let position = 13;
+    const need = count => { if (position + count > bytes.length) throw new Error('Truncated GIF block'); };
+    if (bytes.length < 14 || !/^GIF8[79]a$/.test(String.fromCharCode(...bytes.slice(0, 6)))) throw new Error('Invalid GIF header');
+    if (bytes[10] & 128) position += 3 * 2 ** ((bytes[10] & 7) + 1);
+    let repetitions = null;
+    let terminated = false;
+    const subBlocks = () => {
+        const blocks = [];
+        while (true) {
+            need(1);
+            const length = bytes[position++];
+            if (!length) return blocks;
+            need(length);
+            blocks.push(bytes.slice(position, position + length));
+            position += length;
+        }
+    };
+    while (position < bytes.length) {
+        need(1);
+        const type = bytes[position++];
+        if (type === 0x3b) { terminated = true; break; }
+        if (type === 0x2c) {
+            need(9);
+            const packed = bytes[position + 8];
+            position += 9;
+            if (packed & 128) { const length = 3 * 2 ** ((packed & 7) + 1); need(length); position += length; }
+            need(1);
+            position++;
+            subBlocks();
+        } else if (type === 0x21) {
+            need(1);
+            const label = bytes[position++];
+            if (![0xf9, 0xff, 0xfe, 0x01].includes(label)) throw new Error('Unsupported GIF extension');
+            const blocks = subBlocks();
+            if (label === 0xf9 && (blocks.length !== 1 || blocks[0].length !== 4)) throw new Error('Invalid GIF control block');
+            if (label === 0xff && (!blocks[0] || blocks[0].length !== 11)) throw new Error('Invalid GIF application block');
+            if (label === 0x01 && (!blocks[0] || blocks[0].length !== 12)) throw new Error('Invalid GIF text block');
+            if (label === 0xff && blocks[0] && ['NETSCAPE2.0', 'ANIMEXTS1.0'].includes(String.fromCharCode(...blocks[0])) && blocks[1]?.[0] === 1 && blocks[1].length >= 3) repetitions = blocks[1][1] | (blocks[1][2] << 8);
+        } else throw new Error('Unsupported or corrupt GIF block');
+    }
+    if (!terminated) throw new Error('GIF trailer is missing');
+    const parsed = parseGIF(buffer);
+    const frames = parsed.frames.filter(frame => frame.image);
+    const cycle = frames.reduce((duration, frame) => duration + (frame.gce?.delay || 10) / 100, 0);
+    const animated = frames.length > 1;
+    return { frames: frames.length, animated, cycle, repetitions, duration: animated ? (repetitions === 0 ? Infinity : cycle * ((repetitions ?? 0) + 1)) : 0 };
+}
+
+function checkVideo(metadata, measurement, profile) {
+    const checks = [];
+    const requireMaximum = (label, value, maximum, unit) => {
+        if (!maximum) return;
+        checks.push(result(label, Number.isFinite(value) ? (value <= maximum ? 'pass' : 'fail') : 'unverified', `${Number.isFinite(value) ? value : 'Unknown'} ${unit}; maximum ${maximum} ${unit}.`));
+    };
+    requireMaximum('Video duration', metadata.duration, profile.duration, 's');
+    requireMaximum('Video bitrate', metadata.videoBitrate ? metadata.videoBitrate / 1000000 : null, profile.videoBitrate, 'Mbps');
+    for (const [key, label] of [['videoCodec', 'Video codec'], ['audioCodec', 'Audio codec'], ['channels', 'Audio channels']]) {
+        if (profile[key]) checks.push(result(label, metadata[key] === undefined || metadata[key] === null ? 'unverified' : metadata[key] === profile[key] ? 'pass' : 'fail', `${metadata[key] ?? 'Unknown'}; expected ${profile[key]}.`));
+    }
+    if (profile.frameRate) checks.push(result('Frame rate', !Number.isFinite(metadata.frameRate) ? 'unverified' : Math.abs(metadata.frameRate - profile.frameRate) < 0.02 ? 'pass' : 'fail', `${metadata.frameRate ?? 'Unknown'} fps; expected ${profile.frameRate} fps.`));
+    if (profile.width && profile.height) checks.push(result('Resolution', metadata.width === profile.width && metadata.height === profile.height ? 'pass' : 'fail', `${metadata.width} x ${metadata.height}; expected ${profile.width} x ${profile.height}.`));
+    if (profile.loudness !== null && profile.loudness !== undefined) {
+        checks.push(result('Integrated loudness', !measurement || !Number.isFinite(measurement.lufs) ? 'unverified' : (Math.abs(measurement.lufs - profile.loudness) <= profile.tolerance ? 'pass' : 'fail'), measurement && Number.isFinite(measurement.lufs) ? `${measurement.lufs.toFixed(1)} LUFS; target ${profile.loudness} +/- ${profile.tolerance} LU.` : 'No finite loudness measurement available.'));
+    }
+    if (profile.truePeak !== null && profile.truePeak !== undefined) checks.push(result('True peak', !measurement || !Number.isFinite(measurement.truePeak) ? 'unverified' : (measurement.truePeak <= profile.truePeak ? 'pass' : 'fail'), measurement && Number.isFinite(measurement.truePeak) ? `${measurement.truePeak.toFixed(1)} dBTP; maximum ${profile.truePeak} dBTP.` : 'No true-peak measurement available.'));
+    checks.push(result('Playback review', 'unverified', profile.kind === 'audio' ? 'Confirm content, sound, silence, and the ending against the brief.' : 'Confirm content, sound, safe areas, black frames, and final frame against the brief.'));
+    return checks;
+}
+
+function profileForKind(profiles, kind, overrides = {}) {
+    const group = kind === 'image' ? 'image' : ['video', 'audio'].includes(kind) ? 'media' : 'display';
+    const profile = { ...profiles[group], ...overrides, group, kind };
+    if (kind === 'audio') {
+        for (const key of ['width', 'height', 'videoCodec', 'frameRate', 'videoBitrate']) delete profile[key];
+    }
+    return profile;
+}
+
+// Baseline applied when a limit field is left empty; entered values override it.
+const DEFAULTS = {
+    display: { maxKB: 200, duration: 30, maxFiles: 100 },
+    image: { maxKB: 200, duration: 30 },
+    media: { loudness: -20, tolerance: 4 }
+};
+
+const STANDARD_SIZES = [
+    [300, 250, 'Medium Rectangle'], [336, 280, 'Large Rectangle'], [728, 90, 'Leaderboard'], [970, 90, 'Large Leaderboard'], [970, 250, 'Billboard'],
+    [300, 600, 'Half Page'], [160, 600, 'Wide Skyscraper'], [120, 600, 'Skyscraper'], [300, 1050, 'Portrait'], [320, 50, 'Mobile Banner'],
+    [320, 100, 'Large Mobile Banner'], [300, 50, 'Mobile Banner (Alt)'], [468, 60, 'Full Banner'], [320, 480, 'Mobile Interstitial'],
+    [480, 320, 'Mobile Interstitial (Landscape)'], [1024, 768, 'Tablet Interstitial'], [768, 1024, 'Tablet Interstitial (Portrait)'],
+    [200, 200, 'Small Square'], [250, 250, 'Square'], [240, 400, 'Vertical Rectangle'], [180, 150, 'Small Rectangle'], [125, 125, 'Button'],
+    [234, 60, 'Half Banner'], [120, 90, 'Button 1'], [120, 60, 'Button 2'], [88, 31, 'Micro Bar'],
+    [1800, 1000, 'Background Skin'], [1920, 1080, 'Background Skin (Full HD)'], [2560, 1440, 'Background Skin (2K)']
+].map(([width, height, name]) => ({ width, height, name }));
+
+module.exports = { DEFAULTS, STANDARD_SIZES, LIMITS, result, statusFor, resolveReference, analyzeScripts, analyzeAnimation, inspectGif, checkVideo, profileForKind };
