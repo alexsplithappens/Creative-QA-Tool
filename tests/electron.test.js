@@ -56,7 +56,7 @@ test('native workspace: mixed QA, safe preview, exports, clearing and silent vid
         await page.waitForFunction(() => document.getElementById('run-status').textContent.startsWith('Preflight complete'));
         assert.equal(await page.locator('#total-count').textContent(), '6');
         assert.equal(await page.locator('#failed-count').textContent(), '4');
-        assert.equal(await page.locator('#review-count').textContent(), '2');
+        assert.equal(await page.locator('#review-count').textContent(), '1');
         assert.match(await page.locator('#checks').textContent(), /Click destination/);
         await page.locator('#preview-tab').click();
         await page.getByRole('button', { name: 'Load preview' }).click();

@@ -1,11 +1,11 @@
-import { createIcons, Moon, Sun, BookOpen, Download, ChevronDown, SlidersHorizontal, FolderUp, Plus, Play, Square, Trash2, Search, Files, ScanSearch, Image as ImageIcon, RotateCcw, Maximize, FileArchive, FileImage, Film, CheckCircle2, CircleAlert, CircleHelp, XCircle, LoaderCircle } from 'lucide';
+import { createIcons, Moon, Sun, BookOpen, Download, ChevronDown, SlidersHorizontal, FolderUp, Plus, Play, Square, Trash2, Search, Files, ScanSearch, Image as ImageIcon, RotateCcw, Maximize, FileArchive, FileImage, Film, CheckCircle2, CircleAlert, CircleHelp, XCircle, Info, LoaderCircle } from 'lucide';
 const JSZip = require('jszip');
 const postcss = require('postcss');
 const valueParser = require('postcss-value-parser');
 const { jsPDF } = require('jspdf');
 const XLSX = require('xlsx');
-const { DEFAULTS, STANDARD_SIZES, LIMITS, result, statusFor, resolveReference, checkVideo, profileForKind } = require('./qa-core');
-const icons = { Moon, Sun, BookOpen, Download, ChevronDown, SlidersHorizontal, FolderUp, Plus, Play, Square, Trash2, Search, Files, ScanSearch, Image: ImageIcon, RotateCcw, Maximize, FileArchive, FileImage, Film, CheckCircle2, CircleAlert, CircleHelp, XCircle, LoaderCircle };
+const { DEFAULTS, STANDARD_SIZES, isTrustedHost, LIMITS, result, statusFor, resolveReference, checkVideo, profileForKind } = require('./qa-core');
+const icons = { Moon, Sun, BookOpen, Download, ChevronDown, SlidersHorizontal, FolderUp, Plus, Play, Square, Trash2, Search, Files, ScanSearch, Image: ImageIcon, RotateCcw, Maximize, FileArchive, FileImage, Film, CheckCircle2, CircleAlert, CircleHelp, XCircle, Info, LoaderCircle };
 const state = { items: [], selected: null, filter: 'all', running: false, cancelled: false, worker: null, dirty: false, preview: null, previewVersion: 0, actualSize: false };
 const fields = [...document.querySelectorAll('#spec-settings input, #spec-settings select')].map(field => field.id);
 const $ = id => document.getElementById(id);
@@ -129,7 +129,7 @@ function renderQueue() {
 
 function checkNode(check) {
     const node = element('div', 'check'); node.dataset.status = check.status;
-    node.append(icon({ pass: 'check-circle-2', fail: 'x-circle', warning: 'circle-alert', unverified: 'circle-help' }[check.status] || 'circle-help'));
+    node.append(icon({ pass: 'check-circle-2', fail: 'x-circle', warning: 'circle-alert', note: 'info', unverified: 'circle-help' }[check.status] || 'circle-help'));
     const copy = element('div'); copy.append(element('strong', '', check.label), element('p', '', check.detail));
     if (check.fix && check.status !== 'pass') copy.append(element('p', 'fix', check.fix));
     node.append(copy); return node;
@@ -154,6 +154,7 @@ function renderInspector() {
     $('check-count').textContent = item?.checks.length || 0;
     if (!item?.checks.length) { const empty = element('div', 'inspector-empty'); empty.append(icon(item?.status === 'running' ? 'loader-circle' : 'scan-search'), element('p', '', item?.status === 'running' ? 'Checking creative' : 'No results to display')); $('checks').append(empty); }
     else {
+        if (item.status === 'pass' && item.checks.some(check => check.status === 'note')) $('checks').append(element('div', 'review-bar', 'Passed the main checks. The notes below may matter if the ad server does not accept this creative.'));
         for (const check of item.checks.filter(check => check.status !== 'pass')) $('checks').append(checkNode(check));
         const passes = item.checks.filter(check => check.status === 'pass');
         if (passes.length) { const details = element('details', 'passed-checks'); details.append(element('summary', '', `Passed checks (${passes.length})`)); for (const check of passes) details.append(checkNode(check)); $('checks').append(details); }
@@ -264,9 +265,11 @@ async function processZip(item, profile, buffer) {
     }
     item.checks.push(result('Local dependencies', missing.size ? 'fail' : 'pass', missing.size ? [...missing].join('; ') : 'Parsed HTML and CSS references resolve within the ZIP.', 'Correct paths and include the referenced files; file names are case-sensitive.'));
     item.checks.push(result('HTTPS resources', insecure.size ? 'fail' : 'pass', insecure.size ? [...insecure].join('; ') : 'No HTTP resources found in parsed HTML and CSS.'));
-    if (domains.size) item.checks.push(result('External resources', 'unverified', [...domains].join(', '), 'Confirm destination policy, availability, and network behaviour.'));
-    if (externalScripts.size) item.checks.push(result('Remote JavaScript', 'unverified', 'Remote scripts are not fetched or approved by static analysis.'));
-    item.checks.push(...await workerCheck({ type: 'scripts', scripts, styles, mode: profile.id === 'studio' ? 'studio' : profile.id === 'auto' ? 'auto' : 'display', duration: profile.duration, incomplete: externalScripts.size > 0 }));
+    const foreignDomains = [...domains].filter(host => !isTrustedHost(host));
+    const foreignScripts = [...externalScripts].filter(source => { try { return !isTrustedHost(new URL(source, 'https://preview.invalid').hostname); } catch (_) { return true; } });
+    if (domains.size) item.checks.push(result('External resources', foreignDomains.length ? 'note' : 'pass', foreignDomains.length ? `${foreignDomains.join(', ')}. Confirm destination policy, availability, and network behaviour.` : `Google-hosted only: ${[...domains].join(', ')}.`));
+    if (externalScripts.size) item.checks.push(result('Remote JavaScript', foreignScripts.length ? 'note' : 'pass', foreignScripts.length ? `${foreignScripts.join(', ')} is not fetched or approved by static analysis.` : 'Scripts load from Google-hosted runtime libraries.'));
+    item.checks.push(...await workerCheck({ type: 'scripts', scripts, styles, mode: profile.id === 'studio' ? 'studio' : profile.id === 'auto' ? 'auto' : 'display', duration: profile.duration, incomplete: foreignScripts.length > 0, trustedRuntime: externalScripts.size > foreignScripts.length }));
 }
 
 async function imageDimensions(url) {
@@ -402,7 +405,7 @@ async function loadHTMLPreview(item) {
         preview = await window.electronAPI.extractCreative({ zipBuffer: await item.file.arrayBuffer(), mainHtmlFileName: item.mainHtml });
         if (version !== state.previewVersion || selected()?.id !== item.id) { await window.electronAPI.releasePreview(preview.token); return; }
         const frame = element('iframe'); frame.title = `Preview of ${item.file.name}`; frame.setAttribute('sandbox', 'allow-scripts'); frame.setAttribute('referrerpolicy', 'no-referrer');
-        frame.width = item.metadata.width; frame.height = item.metadata.height;
+        frame.width = item.metadata.width; frame.height = item.metadata.height; frame.setAttribute('scrolling', 'no');
         const canvas = element('div', 'preview-canvas'); canvas.append(frame); $('preview-stage').replaceChildren(canvas);
         const started = performance.now();
         const fit = () => { const stage = $('preview-stage'); const scale = state.actualSize ? 1 : Math.min(1, (stage.clientWidth - 32) / item.metadata.width, (stage.clientHeight - 32) / item.metadata.height); canvas.style.width = `${item.metadata.width * scale}px`; canvas.style.height = `${item.metadata.height * scale}px`; frame.style.transform = `scale(${scale})`; };
@@ -423,7 +426,7 @@ function selectTab(name) {
 }
 
 function exportRows() {
-    return state.items.filter(item => item.profile).map(item => ({ 'File Name': item.file.name, 'File Type': extension(item.file.name).toUpperCase(), 'Creative Type': kindLabel(item.kind), 'Creative Size': item.kind === 'audio' ? 'Audio only' : item.metadata.width ? `${item.metadata.width}x${item.metadata.height}` : 'Unknown', 'Duration (s)': item.metadata.duration ?? '', 'QA Status': statusLabel(displayStatus(item)), 'Blockers': item.checks.filter(check => check.status === 'fail').map(check => `${check.label}: ${check.detail}`).join('; '), 'Review Items': item.checks.filter(check => ['warning', 'unverified'].includes(check.status)).map(check => `${check.label}: ${check.detail}`).join('; '), 'Specification': item.profile.reference || item.profile.name, 'Rules Version': item.profile.version, 'Manual Review': item.reviewed ? 'Completed' : 'Pending', 'Reviewed At': item.reviewedAt || '', 'Checked At': item.checkedAt, 'SHA-256': item.hash || '', 'Creative Name': `${item.file.name} | ${kindLabel(item.kind)} | ${item.kind === 'audio' ? `${Number(item.metadata.duration || 0).toFixed(2)}s` : item.metadata.width ? `${item.metadata.width}x${item.metadata.height}` : 'Unknown'}` }));
+    return state.items.filter(item => item.profile).map(item => ({ 'File Name': item.file.name, 'File Type': extension(item.file.name).toUpperCase(), 'Creative Type': kindLabel(item.kind), 'Creative Size': item.kind === 'audio' ? 'Audio only' : item.metadata.width ? `${item.metadata.width}x${item.metadata.height}` : 'Unknown', 'Duration (s)': item.metadata.duration ?? '', 'QA Status': statusLabel(displayStatus(item)), 'Blockers': item.checks.filter(check => check.status === 'fail').map(check => `${check.label}: ${check.detail}`).join('; '), 'Review Items': item.checks.filter(check => ['warning', 'unverified', 'note'].includes(check.status)).map(check => `${check.label}: ${check.detail}`).join('; '), 'Specification': item.profile.reference || item.profile.name, 'Rules Version': item.profile.version, 'Manual Review': item.reviewed ? 'Completed' : 'Pending', 'Reviewed At': item.reviewedAt || '', 'Checked At': item.checkedAt, 'SHA-256': item.hash || '', 'Creative Name': `${item.file.name} | ${kindLabel(item.kind)} | ${item.kind === 'audio' ? `${Number(item.metadata.duration || 0).toFixed(2)}s` : item.metadata.width ? `${item.metadata.width}x${item.metadata.height}` : 'Unknown'}` }));
 }
 
 function download(filename, blob) {

@@ -21,13 +21,13 @@ test('comments cannot satisfy click checks', () => {
 });
 test('external executable click code is recognised but still needs runtime review', () => {
     const checks = qa.analyzeScripts([{ name: 'click.js', content: 'var clickTag="https://example.com"; document.onclick=()=>window.open(clickTag);' }]);
-    assert.equal(checks[0].status, 'unverified');
+    assert.equal(checks[0].status, 'note');
 });
 test('function-local clickTag is not an injectable global', () => {
     assert.equal(qa.analyzeScripts([{ name: 'click.js', content: 'function click(){var clickTag="https://example.com"; window.open(clickTag)}' }])[0].status, 'fail');
 });
 test('Studio exits do not require display clickTag or untracked fallback', () => {
-    assert.equal(qa.analyzeScripts([{ name: 'exit.js', content: 'Enabler.exit("Primary exit");' }], 'studio')[0].status, 'unverified');
+    assert.equal(qa.analyzeScripts([{ name: 'exit.js', content: 'Enabler.exit("Primary exit");' }], 'studio')[0].status, 'note');
 });
 test('CSS animation combines separate duration, count and delay', () => {
     const check = qa.analyzeAnimation([{ content: '.ad {animation-duration:20s;animation-iteration-count:3;animation-delay:2s}' }], 30);
@@ -38,8 +38,15 @@ test('CSS shorthand and milliseconds are measured', () => {
     assert.equal(qa.analyzeAnimation([{ content: '.ad {animation:fade 500ms 2s 3}' }], 3).status, 'fail');
     assert.equal(qa.analyzeAnimation([{ content: '.ad {animation:fade 2s infinite}' }], 30).status, 'fail');
 });
-test('undetected animation is not a pass', () => {
-    assert.equal(qa.analyzeAnimation([], 30).status, 'unverified');
+test('undetected animation is an advisory note, not a pass or block', () => {
+    assert.equal(qa.analyzeAnimation([], 30).status, 'note');
+    assert.equal(qa.statusFor([qa.result('a', 'pass', ''), qa.result('b', 'note', '')]), 'pass');
+});
+test('Google-hosted runtimes are trusted and make a missing local exit advisory', () => {
+    assert.equal(qa.isTrustedHost('s0.2mdn.net'), true);
+    assert.equal(qa.isTrustedHost('example.com'), false);
+    assert.equal(qa.analyzeScripts([], 'display', false, true)[0].status, 'note');
+    assert.equal(qa.analyzeScripts([{ name: 'a.js', content: 'var u="http://www.google.com";' }], 'display', false, true).find(check => check.label === 'HTTP strings').status, 'note');
 });
 test('references resolve relative to the owning CSS file and preserve case', () => {
     assert.equal(qa.resolveReference('css/style.css', '../images/Bg.png?v=2#asset'), 'images/Bg.png');
@@ -70,7 +77,7 @@ test('remote scripts are inconclusive rather than a false click failure', () => 
     assert.equal(qa.analyzeScripts([], 'display', true)[0].status, 'unverified');
 });
 test('Google Web Designer exits are supported without forcing a display clickTag', () => {
-    assert.equal(qa.analyzeScripts([{ name: 'gwd.js', content: 'gwd.actions.gwdGoogleAd.exit("ad", "exit");' }])[0].status, 'unverified');
+    assert.equal(qa.analyzeScripts([{ name: 'gwd.js', content: 'gwd.actions.gwdGoogleAd.exit("ad", "exit");' }])[0].status, 'note');
 });
 test('video codec, channels and frame rate respect the selected specification', () => {
     const checks = qa.checkVideo({ videoCodec: 'h264', audioCodec: 'aac', channels: 1, frameRate: 25 }, null, { videoCodec: 'h264', audioCodec: 'aac', channels: 2, frameRate: 30 });

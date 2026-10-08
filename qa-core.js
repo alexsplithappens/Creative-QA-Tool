@@ -15,6 +15,11 @@ function statusFor(checks) {
     return 'pass';
 }
 
+// Hosts that serve Google ad runtimes and libraries; trusted without fetching.
+function isTrustedHost(host) {
+    return /(?:^|\.)(?:2mdn\.net|gstatic\.com|googleapis\.com|doubleclick\.net|googlesyndication\.com|googletagservices\.com)$/i.test(host);
+}
+
 function resolveReference(owner, reference) {
     const value = reference.trim();
     if (!value || value.startsWith('#') || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(value)) return null;
@@ -40,7 +45,7 @@ function memberName(node) {
     return '';
 }
 
-function analyzeScripts(sources, mode = 'display', incomplete = false) {
+function analyzeScripts(sources, mode = 'display', incomplete = false, trustedRuntime = false) {
     const checks = [];
     let declared = false;
     let opener = false;
@@ -85,13 +90,15 @@ function analyzeScripts(sources, mode = 'display', incomplete = false) {
         });
     }
     if (mode === 'studio' || (mode === 'auto' && studioExit && !(declared && opener))) {
-        checks.push(result('Studio exit', studioExit || gwdExit ? 'unverified' : (parseFailed ? 'unverified' : 'fail'), studioExit || gwdExit ? 'Supported exit API found. Activation and exit mapping require runtime review.' : 'No supported exit could be verified.', 'Verify the exit in Studio/CM360 preview; no untracked fallback is required.'));
+        const missing = trustedRuntime ? 'note' : (parseFailed ? 'unverified' : 'fail');
+        checks.push(result('Studio exit', studioExit || gwdExit ? 'note' : missing, studioExit || gwdExit ? 'Supported exit API found. Activation and exit mapping require runtime review.' : 'No supported exit could be verified.', 'Verify the exit in Studio/CM360 preview; no untracked fallback is required.'));
     } else {
         const candidate = declared && opener || gwdExit;
-        checks.push(result('Click destination', candidate ? 'unverified' : (parseFailed ? 'unverified' : 'fail'), candidate ? 'Supported click destination found. User interaction still requires review.' : 'A supported click destination could not be verified.', candidate ? 'Verify the exit in the destination platform preview.' : 'Use the destination-supported clickTag or Google Web Designer exit implementation.'));
+        const missing = trustedRuntime ? 'note' : (parseFailed ? 'unverified' : 'fail');
+        checks.push(result('Click destination', candidate ? 'note' : missing, candidate ? 'Supported click destination found. The landing URL is normally set in the ad server.' : 'A supported click destination could not be verified in the local scripts.', candidate ? 'Verify the exit in the destination platform preview.' : 'Use the destination-supported clickTag or Google Web Designer exit implementation.'));
     }
     checks.push(result('Storage APIs', storage.size ? 'warning' : (parseFailed ? 'unverified' : 'pass'), storage.size ? `Storage references: ${[...storage].join(', ')}` : 'No storage API references found in parsed local scripts.', 'Check the destination policy and whether these APIs execute.'));
-    if (insecure.size) checks.push(result('HTTP strings', 'warning', [...insecure].join(', '), 'Confirm that fetched resources and landing destinations use HTTPS.'));
+    if (insecure.size) checks.push(result('HTTP strings', 'note', `${[...insecure].join(', ')}. Often a placeholder click-through URL that the ad server replaces.`, 'Confirm that fetched resources and landing destinations use HTTPS.'));
     return checks;
 }
 
@@ -155,7 +162,8 @@ function analyzeAnimation(sources, limit) {
     }
     if (infinite) return result('CSS animation', limit ? 'fail' : 'warning', 'An infinite CSS animation was found.', 'Use a finite iteration count when required by delivery specs.');
     if (limit && longest > limit) return result('CSS animation', 'fail', `Declared playback reaches ${longest.toFixed(2)}s; selected limit is ${limit}s.`, 'Reduce repetitions, duration, or delays.');
-    return result('Animation playback', 'unverified', `${found ? `Longest declared CSS playback: ${longest.toFixed(2)}s. ` : 'No CSS animation found. '}${unknown ? 'Some CSS could not be resolved. ' : ''}JavaScript, cascading styles, and final-frame behaviour require playback review.`);
+    if (!found) return result('Animation playback', 'note', `No CSS animation declared${unknown ? '; some CSS could not be resolved' : ''}. Any motion is driven by JavaScript or the runtime, so confirm timing and the final frame in the preview.`);
+    return result('Animation playback', 'note', `Longest declared CSS playback: ${longest.toFixed(2)}s. ${unknown ? 'Some CSS could not be resolved. ' : ''}JavaScript, cascading styles, and final-frame behaviour require playback review.`);
 }
 
 function inspectGif(buffer) {
@@ -255,4 +263,4 @@ const STANDARD_SIZES = [
     [1800, 1000, 'Background Skin'], [1920, 1080, 'Background Skin (Full HD)'], [2560, 1440, 'Background Skin (2K)']
 ].map(([width, height, name]) => ({ width, height, name }));
 
-module.exports = { DEFAULTS, STANDARD_SIZES, LIMITS, result, statusFor, resolveReference, analyzeScripts, analyzeAnimation, inspectGif, checkVideo, profileForKind };
+module.exports = { DEFAULTS, STANDARD_SIZES, isTrustedHost, LIMITS, result, statusFor, resolveReference, analyzeScripts, analyzeAnimation, inspectGif, checkVideo, profileForKind };
