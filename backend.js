@@ -21,7 +21,7 @@ function finite(value) {
 }
 
 function previewInstrumentation(token) {
-    return `<script>(function(){const token=${JSON.stringify(token)};const send=(kind,detail)=>parent.postMessage({creativeQA:token,kind,detail:String(detail).slice(0,2000)},'*');window.open=function(url){send('exit',url);return null;};document.addEventListener('click',function(event){const link=event.target.closest&&event.target.closest('a');if(link&&link.href&&!link.href.startsWith('javascript:')){event.preventDefault();send('exit',link.href);}},true);window.addEventListener('error',function(event){send('error',event.message||('Resource failed: '+(event.target.src||event.target.href||'unknown')));},true);window.addEventListener('unhandledrejection',function(event){send('error',event.reason);});send('loaded',location.pathname);})();</script>`;
+    return `<script>(function(){const token=${JSON.stringify(token)};const send=(kind,detail)=>parent.postMessage({creativeQA:token,kind,detail:String(detail).slice(0,2000)},'*');window.open=function(url){send('exit',url);return null;};document.addEventListener('click',function(event){const link=event.target.closest&&event.target.closest('a');if(link&&link.href){event.preventDefault();if(/^javascript:/i.test(link.href)){try{(0,eval)(decodeURIComponent(link.href.slice(11)));}catch(error){send('error',error.message);}}else send('exit',link.href);}},true);window.addEventListener('error',function(event){send('error',event.message||('Resource failed: '+(event.target.src||event.target.href||'unknown')));},true);window.addEventListener('unhandledrejection',function(event){send('error',event.reason);});send('loaded',location.pathname);})();</script>`;
 }
 
 function createBackend(binaryDirectory) {
