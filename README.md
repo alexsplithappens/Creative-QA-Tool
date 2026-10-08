@@ -1,6 +1,6 @@
 # Sunshine's Creative QA Tool
 
-Windows desktop preflight and manual review for HTML5 ZIPs, images, and video.
+Windows desktop preflight and manual review for HTML5 ZIPs, images, video, and audio.
 
 ## Run And Build
 
@@ -16,9 +16,16 @@ Native tests use an isolated temporary user-data profile, not the operator's sav
 
 ## Review Workflow
 
-Select the destination and enter limits from the current publisher/platform specification. Upload a mixed batch, run preflight, and inspect exceptions. Display/expanded-ZIP size and video size have separate limits. Delivery limits are deliberately not guessed from a universal 200 KB or loudness rule.
+Drop a mixed batch into one queue; each file's type (HTML5 ZIP, JPG/GIF/PNG image, video, audio) is detected automatically, and no up-front choice is needed. Run preflight and inspect exceptions. Filter and sort the queue by type or name.
 
-The destination selects the exit-checking model and applicable structural checks. It is not a complete, automatically updated specification catalogue. The reference and entered limits are captured with each result. Changing specifications invalidates earlier results and requires another run.
+There are two ways to check:
+
+- **No input:** leave Optional limits empty and the built-in baseline applies: 200 KB and 30 s for HTML5 ZIPs, 200 KB and 30 s GIF playback for images, at most 100 ZIP files, standard ad sizes (non-standard sizes warn), and a -24 to -16 LUFS loudness range for video/audio. Structural checks (clickTag/exit, storage APIs, `ad.size`, UTF-8, dependencies, HTTPS) always run.
+- **Your own spec:** open Optional limits and enter values. HTML5 display, image, and video/audio have independent fieldsets, and an entered value replaces the baseline for that type only. Video-only settings are ignored for audio. Select an asset and use Asset limits to override width, height, or duration for that file without changing the type defaults.
+
+The reference, entered limits, and any defaulted values are recorded with each result and in the exports. Changing limits invalidates only the affected assets, which then need another run. Previously saved shared limits are not copied into every type.
+
+The destination selects the exit-checking model and applicable structural checks. It is not a complete, automatically updated specification catalogue. The baseline is a general guide, not a publisher specification; enter the real limits when you have them.
 
 - **Blocked:** a hard failure was detected. A manual-review checkbox cannot override this.
 - **Review:** warnings or checks that cannot be established statically remain.
