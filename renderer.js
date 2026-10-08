@@ -456,7 +456,7 @@ $('search').oninput = () => { renderQueue(); refreshIcons(); };
 $('type-filter').onchange = () => { renderQueue(); refreshIcons(); };
 $('sort-order').onchange = () => { renderQueue(); refreshIcons(); };
 for (const button of document.querySelectorAll('[data-filter]')) button.onclick = () => { state.filter = button.dataset.filter; for (const sibling of document.querySelectorAll('[data-filter]')) sibling.setAttribute('aria-pressed', String(sibling === button)); renderQueue(); refreshIcons(); };
-for (const id of fields) $(id).addEventListener('change', () => {
+for (const id of fields) $(id).addEventListener('input', () => {
     const group = $(id).closest('[data-group]').dataset.group;
     const affected = state.items.filter(item => profileForKind({}, item.kind).group === group);
     if (affected.some(item => item.id === state.selected)) releasePreview();
@@ -466,7 +466,7 @@ for (const id of fields) $(id).addEventListener('change', () => {
     try { localStorage.setItem('sunshine-settings', JSON.stringify(Object.fromEntries(fields.map(field => [field, $(field).type === 'checkbox' ? $(field).checked : $(field).value])))); } catch (_) {}
     render();
 });
-for (const key of ['width', 'height', 'duration']) $(`asset-${key}`).onchange = () => {
+for (const key of ['width', 'height', 'duration']) $(`asset-${key}`).oninput = () => {
     const item = selected(); if (!item || state.running) return;
     const input = $(`asset-${key}`);
     if (!input.checkValidity()) { input.reportValidity(); return; }
