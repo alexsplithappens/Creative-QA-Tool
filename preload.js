@@ -9,7 +9,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onPreviewNavigation: callback => ipcRenderer.on('preview-navigation-blocked', (_event, url) => callback(String(url))),
     getAppInfo: () => ipcRenderer.invoke('app-info'),
     logError: message => ipcRenderer.invoke('log-error', String(message).slice(0, 2000)),
-    reportIssue: () => ipcRenderer.invoke('report-issue'),
     copyDiagnostics: () => ipcRenderer.invoke('copy-diagnostics'),
     openLogFolder: () => ipcRenderer.invoke('open-log-folder')
 });

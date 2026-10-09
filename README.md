@@ -12,7 +12,7 @@ Windows desktop preflight and manual review for HTML5 ZIPs, images, video, and a
 
 The runtime does not depend on CDN scripts. Keep `ffmpeg/ffmpeg.exe` and `ffmpeg/ffprobe.exe` available (they are git-ignored; the project uses the gyan.dev 'essentials' build, about 100 MB each, with its GPL v3 licence in `ffmpeg/LICENSE.txt`); the build copies them to application resources. See `THIRD_PARTY_NOTICES.md` before redistributing.
 
-The Help button shows known limits and offers Report an issue (copies diagnostics and opens an email to alex.pearce@omc.com), Copy diagnostics, and Open log folder. Errors are logged to `app.log` in the user-data `logs` folder.
+The Help button shows known limits and the feedback address (alex.pearce@omc.com), with Copy diagnostics and Open log folder to help with bug reports. Errors are logged to `app.log` in the user-data `logs` folder.
 
 Native tests use an isolated temporary user-data profile, not the operator's saved settings. `npm audit --omit=dev` is clear at verification time. Full audit still reports a moderate upstream `sprintf-js` advisory through electron-builder's proxy/logging dependencies; resolving it currently requires an installer-toolchain downgrade rather than a runtime fix.
 

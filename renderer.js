@@ -652,8 +652,7 @@ window.electronAPI?.getAppInfo().then(info => { $('app-version').textContent = i
 const helpFeedback = text => { $('help-feedback').textContent = text; };
 $('help-button').onclick = () => { helpFeedback(''); $('help-dialog').showModal(); };
 $('close-help').onclick = () => $('help-dialog').close();
-$('report-issue').onclick = () => window.electronAPI?.reportIssue().then(() => helpFeedback('Diagnostics copied. Paste them into the email that just opened.')).catch(error => helpFeedback(error.message));
-$('copy-diagnostics').onclick = () => window.electronAPI?.copyDiagnostics().then(() => helpFeedback('Diagnostics copied to the clipboard.')).catch(error => helpFeedback(error.message));
+$('copy-diagnostics').onclick = () => window.electronAPI?.copyDiagnostics().then(() => helpFeedback('Diagnostics copied. Paste them into your email.')).catch(error => helpFeedback(error.message));
 $('open-logs').onclick = () => window.electronAPI?.openLogFolder().catch(error => helpFeedback(error.message));
 if (!window.electronAPI) $('connection').textContent = 'Browser workspace';
 render();

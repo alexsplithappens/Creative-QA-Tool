@@ -5,7 +5,6 @@ const os = require('node:os');
 const { pathToFileURL } = require('node:url');
 const { createBackend } = require('./backend');
 
-const SUPPORT_EMAIL = 'alex.pearce@omc.com';
 const APP_VERSION = require('./package.json').version;
 
 const customUserData = app.commandLine.getSwitchValue('user-data-dir');
@@ -75,13 +74,6 @@ ipcMain.handle('cancel-analyses', event => { trusted(event); backend.cancelAnaly
 ipcMain.handle('app-info', event => { trusted(event); return { version: APP_VERSION }; });
 ipcMain.handle('log-error', (event, message) => { trusted(event); log('RENDERER', message); });
 ipcMain.handle('copy-diagnostics', event => { trusted(event); clipboard.writeText(diagnostics()); });
-ipcMain.handle('report-issue', event => {
-    trusted(event);
-    clipboard.writeText(diagnostics());
-    const subject = encodeURIComponent(`Creative QA Tool issue (v${APP_VERSION})`);
-    const body = encodeURIComponent('What happened:\n\n\nWhat you expected:\n\n\nDiagnostics (paste here with Ctrl+V):\n');
-    return shell.openExternal(`mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`);
-});
 ipcMain.handle('open-log-folder', async event => { trusted(event); fs.mkdirSync(logDirectory(), { recursive: true }); const failure = await shell.openPath(logDirectory()); if (failure) throw new Error(failure); });
 ipcMain.handle('open-documentation', (event, url) => {
     trusted(event);
