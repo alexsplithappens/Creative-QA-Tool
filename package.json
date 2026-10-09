@@ -1,6 +1,6 @@
 {
   "name": "sunshines-creative-qa-tool",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Sunshine's Creative QA Tool - HTML5, Image, and Video QA",
   "main": "main.js",
   "scripts": {

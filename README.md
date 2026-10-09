@@ -10,7 +10,9 @@ Windows desktop preflight and manual review for HTML5 ZIPs, images, video, and a
 - `npm run build:win` creates the Windows installer.
 - `npm run build:win -- --dir` creates an unpacked Windows application for packaging checks.
 
-The runtime does not depend on CDN scripts. Keep `ffmpeg/ffmpeg.exe` and `ffmpeg/ffprobe.exe` available; the build copies them to application resources. Review the existing FFmpeg distribution's licence obligations before distributing the installer.
+The runtime does not depend on CDN scripts. Keep `ffmpeg/ffmpeg.exe` and `ffmpeg/ffprobe.exe` available (they are git-ignored; the project uses the gyan.dev 'essentials' build, about 100 MB each, with its GPL v3 licence in `ffmpeg/LICENSE.txt`); the build copies them to application resources. See `THIRD_PARTY_NOTICES.md` before redistributing.
+
+The Help button shows known limits and offers Report an issue (copies diagnostics and opens an email to alex.pearce@omc.com), Copy diagnostics, and Open log folder. Errors are logged to `app.log` in the user-data `logs` folder.
 
 Native tests use an isolated temporary user-data profile, not the operator's saved settings. `npm audit --omit=dev` is clear at verification time. Full audit still reports a moderate upstream `sprintf-js` advisory through electron-builder's proxy/logging dependencies; resolving it currently requires an installer-toolchain downgrade rather than a runtime fix.
 
@@ -44,7 +46,7 @@ Static parsing recognises local executable JavaScript, display clickTags, GWD ex
 
 GIF blocks are bounds-checked before gifuct-js parsing, including repeat timing. Border inspection is manual rather than a pixel heuristic presented as certainty. Video metadata is probed before audio measurement so silent clips retain codec/frame-rate data. No RMS-to-LUFS estimate is used. Missing or non-finite measurements remain unverified.
 
-The app does not authenticate to GMP, submit creatives, guarantee platform acceptance, validate VAST redirects, or automatically map placements/backup assets. PDF's built-in font supports Latin-1; filenames outside that character set will not render correctly.
+The app does not authenticate to GMP, submit creatives, guarantee platform acceptance, validate VAST redirects, or automatically map placements/backup assets. PDF text outside Latin-1 (for example Hindi or Chinese filenames) is drawn with the system fonts and embedded as images, so it prints correctly but is not selectable.
 
 ## Security And Structure
 

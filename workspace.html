@@ -12,7 +12,7 @@
     <header class="app-header">
         <a class="brand" href="#"><img src="icon.ico" width="36" height="36" alt=""><span>Sunshine's<strong>Creative QA</strong></span></a>
         <span class="workspace-label">QA in style, with Sunshine's Creative QA Tool</span>
-        <div class="header-actions"><span id="connection" class="connection">Local workspace</span><button id="theme-toggle" class="icon-button" aria-label="Switch colour theme" title="Switch colour theme"><i data-lucide="moon"></i></button></div>
+        <div class="header-actions"><span id="connection" class="connection">Local workspace</span><button id="help-button" class="text-button"><i data-lucide="circle-help"></i>Help</button><button id="theme-toggle" class="icon-button" aria-label="Switch colour theme" title="Switch colour theme"><i data-lucide="moon"></i></button></div>
     </header>
     <main>
         <section class="page-heading"><div><div class="eyebrow">REVIEW</div><h1>Creative Review</h1></div><div class="heading-actions"><button id="docs-button" class="text-button"><i data-lucide="book-open"></i>Specifications</button><details class="export-menu"><summary><i data-lucide="download"></i>Export<i data-lucide="chevron-down"></i></summary><div class="menu-items"><button id="export-pdf" disabled>QA report (.pdf)</button></div></details></div></section>
@@ -76,6 +76,23 @@
             </aside>
         </div>
     </main>
-    <footer><span>Sunshine's Creative QA <span class="footer-version">2.0</span></span><span id="spec-version">Rules 2026.10</span></footer>
+    <footer><span>Sunshine's Creative QA <span id="app-version" class="footer-version"></span></span><span id="spec-version">Rules 2026.10</span></footer>
+    <dialog id="help-dialog" aria-labelledby="help-title">
+        <h2 id="help-title">Help and known limits</h2>
+        <ul>
+            <li>This is a local preflight and review aid. It is not platform approval.</li>
+            <li>Empty limit fields use a general baseline. Only the CM360 preset comes from Google's documentation; DV360, Rich Media and Custom use the general baseline, so enter the real limits when you have them.</li>
+            <li>Click and exit detection combines static analysis with a sandboxed preview. It can miss unusual implementations, so always confirm in the destination platform's own preview.</li>
+            <li>Previews cannot reach external sites. Clicks, Enabler exits and page redirects are captured and shown instead.</li>
+            <li>Video and audio checks need the bundled FFmpeg tools in the desktop app.</li>
+        </ul>
+        <p id="help-feedback" role="status"></p>
+        <div class="dialog-actions">
+            <button id="report-issue" class="button">Report an issue</button>
+            <button id="copy-diagnostics" class="button secondary">Copy diagnostics</button>
+            <button id="open-logs" class="button secondary">Open log folder</button>
+            <button id="close-help" class="button secondary">Close</button>
+        </div>
+    </dialog>
 </body>
 </html>

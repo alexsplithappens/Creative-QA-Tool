@@ -362,6 +362,7 @@ async function runBatch() {
         catch (error) {
             if (state.cancelled) { item.status = 'pending'; item.profile = null; item.checks = []; break; }
             item.checks.push(result('Processing', 'fail', error.message, 'Check the source file and packaging. Other files in the batch will continue.'));
+            window.electronAPI?.logError(`Processing failed (${item.kind}): ${error.message}`).catch(() => {});
             item.profile = structuredClone(profile); item.checkedAt = new Date().toISOString(); item.status = 'fail';
         }
         completed++; $('batch-progress').value = completed; render();
@@ -448,10 +449,33 @@ function exportPDF() {
     let y = margin;
     const safe = value => String(value).replace(/[^\x20-\x7e\xa0-\xff\n]/g, '?');
     const colour = name => doc.setTextColor(...PDF_COLOURS[name]);
+    // The built-in PDF fonts are Latin-1 only, so other scripts are drawn with the system fonts and embedded as images.
+    const needsImage = text => /[^\x00-\xff]/.test(text);
+    const density = 22;
+    const canvasFont = (size, bold) => `${bold ? '700 ' : ''}${size * 0.3528 * density}px "Segoe UI","Nirmala UI","Microsoft YaHei UI","Yu Gothic UI","Malgun Gothic",sans-serif`;
+    const imageLines = (text, size, bold, maxWidth) => {
+        const context = document.createElement('canvas').getContext('2d'); context.font = canvasFont(size, bold);
+        const limit = maxWidth * density; const lines = []; let current = '';
+        for (const character of String(text)) {
+            if (character === '\n' || (current && context.measureText(current + character).width > limit)) { lines.push(current); current = character === '\n' ? '' : character; } else current += character;
+        }
+        if (current) lines.push(current);
+        return lines;
+    };
+    const drawImageLine = (line, x, top, size, bold, tone) => {
+        const canvas = document.createElement('canvas'); const context = canvas.getContext('2d'); context.font = canvasFont(size, bold);
+        const fontPx = size * 0.3528 * density; canvas.width = Math.ceil(context.measureText(line).width) + 2; canvas.height = Math.ceil(fontPx * 1.35);
+        context.font = canvasFont(size, bold); context.fillStyle = `rgb(${PDF_COLOURS[tone].join(',')})`; context.textBaseline = 'alphabetic'; context.fillText(line, 0, fontPx * 1.05);
+        doc.addImage(canvas.toDataURL('image/png'), 'PNG', x, top - size * 0.04, canvas.width / density, canvas.height / density);
+    };
     const ensure = height => { if (y + height > bottom) { doc.addPage(); y = margin; } };
     const write = (text, { x = margin, size = 9, bold = false, tone = 'ink', maxWidth = width, gap = 1.2, font = 'helvetica' } = {}) => {
         doc.setFont(font, bold ? 'bold' : 'normal'); doc.setFontSize(size); colour(tone);
         const lineHeight = size * 0.42;
+        if (needsImage(text)) {
+            for (const wrapped of imageLines(text, size, bold, maxWidth)) { ensure(lineHeight); drawImageLine(wrapped, x, y, size, bold, tone); y += lineHeight; }
+            y += gap; return;
+        }
         for (const wrapped of doc.splitTextToSize(safe(text), maxWidth)) { ensure(lineHeight); doc.text(wrapped, x, y + lineHeight * 0.8); y += lineHeight; }
         y += gap;
     };
@@ -487,9 +511,10 @@ function exportPDF() {
         const status = displayStatus(item);
         const tone = status === 'fail' ? 'fail' : status === 'pass' || status === 'reviewed' ? 'pass' : 'review';
         const issues = item.checks.filter(check => check.status === 'fail').length;
-        const nameLines = doc.splitTextToSize(safe(item.file.name), 82);
+        const unicodeName = needsImage(item.file.name);
+        const nameLines = unicodeName ? imageLines(item.file.name, 8.5, false, 82) : doc.splitTextToSize(safe(item.file.name), 82);
         doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); colour('ink');
-        doc.text(nameLines, margin + 1.5, y + 3.6);
+        if (unicodeName) nameLines.forEach((line, index) => drawImageLine(line, margin + 1.5, y + 0.4 + index * 3.6, 8.5, false, 'ink')); else doc.text(nameLines, margin + 1.5, y + 3.6);
         doc.text(kindLabel(item.kind), margin + 87.5, y + 3.6);
         doc.text(item.kind === 'audio' ? 'Audio' : item.metadata.width ? `${item.metadata.width} x ${item.metadata.height}` : '-', margin + 111.5, y + 3.6);
         doc.setFont('helvetica', 'bold'); colour(tone); doc.text(`${statusLabel(status)}${issues ? ` (${issues} blocker${issues > 1 ? 's' : ''})` : ''}`, margin + 139.5, y + 3.6);
@@ -621,5 +646,14 @@ try {
     if (localStorage.getItem('sunshine-theme') === 'dark') { document.body.classList.add('dark'); $('theme-toggle').replaceChildren(icon('sun')); }
 } catch (_) {}
 refreshPlaceholders();
+window.addEventListener('error', event => window.electronAPI?.logError(`Uncaught: ${event.message}`).catch(() => {}));
+window.addEventListener('unhandledrejection', event => window.electronAPI?.logError(`Unhandled rejection: ${event.reason?.message || event.reason}`).catch(() => {}));
+window.electronAPI?.getAppInfo().then(info => { $('app-version').textContent = info.version; }).catch(() => {});
+const helpFeedback = text => { $('help-feedback').textContent = text; };
+$('help-button').onclick = () => { helpFeedback(''); $('help-dialog').showModal(); };
+$('close-help').onclick = () => $('help-dialog').close();
+$('report-issue').onclick = () => window.electronAPI?.reportIssue().then(() => helpFeedback('Diagnostics copied. Paste them into the email that just opened.')).catch(error => helpFeedback(error.message));
+$('copy-diagnostics').onclick = () => window.electronAPI?.copyDiagnostics().then(() => helpFeedback('Diagnostics copied to the clipboard.')).catch(error => helpFeedback(error.message));
+$('open-logs').onclick = () => window.electronAPI?.openLogFolder().catch(error => helpFeedback(error.message));
 if (!window.electronAPI) $('connection').textContent = 'Browser workspace';
 render();
