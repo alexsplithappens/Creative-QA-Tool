@@ -253,6 +253,10 @@ const DEFAULTS = {
     media: { loudness: -20, tolerance: 4 }
 };
 
+// Per-destination baselines; ids without an entry use the general baseline.
+const PRESETS = { cm360: { ...DEFAULTS, display: { maxKB: 10240, duration: 30, maxFiles: 100 } } };
+const defaultsFor = id => PRESETS[id] || DEFAULTS;
+
 const STANDARD_SIZES = [
     [300, 250, 'Medium Rectangle'], [336, 280, 'Large Rectangle'], [728, 90, 'Leaderboard'], [970, 90, 'Large Leaderboard'], [970, 250, 'Billboard'],
     [300, 600, 'Half Page'], [160, 600, 'Wide Skyscraper'], [120, 600, 'Skyscraper'], [300, 1050, 'Portrait'], [320, 50, 'Mobile Banner'],
@@ -263,4 +267,4 @@ const STANDARD_SIZES = [
     [1800, 1000, 'Background Skin'], [1920, 1080, 'Background Skin (Full HD)'], [2560, 1440, 'Background Skin (2K)']
 ].map(([width, height, name]) => ({ width, height, name }));
 
-module.exports = { DEFAULTS, STANDARD_SIZES, isTrustedHost, LIMITS, result, statusFor, resolveReference, analyzeScripts, analyzeAnimation, inspectGif, checkVideo, profileForKind };
+module.exports = { DEFAULTS, defaultsFor, STANDARD_SIZES, isTrustedHost, LIMITS, result, statusFor, resolveReference, analyzeScripts, analyzeAnimation, inspectGif, checkVideo, profileForKind };

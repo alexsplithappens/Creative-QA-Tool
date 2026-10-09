@@ -4,7 +4,7 @@ const postcss = require('postcss');
 const valueParser = require('postcss-value-parser');
 const { jsPDF } = require('jspdf');
 const XLSX = require('xlsx');
-const { DEFAULTS, STANDARD_SIZES, isTrustedHost, LIMITS, result, statusFor, resolveReference, checkVideo, profileForKind } = require('./qa-core');
+const { DEFAULTS, defaultsFor, STANDARD_SIZES, isTrustedHost, LIMITS, result, statusFor, resolveReference, checkVideo, profileForKind } = require('./qa-core');
 const icons = { Moon, Sun, BookOpen, Download, ChevronDown, SlidersHorizontal, FolderUp, Plus, Play, Square, Trash2, Search, Files, ScanSearch, Image: ImageIcon, RotateCcw, Maximize, FileArchive, FileImage, Film, CheckCircle2, CircleAlert, CircleHelp, XCircle, Info, LoaderCircle };
 const state = { items: [], selected: null, filter: 'all', running: false, cancelled: false, worker: null, dirty: false, preview: null, previewVersion: 0, actualSize: false };
 const fields = [...document.querySelectorAll('#spec-settings input, #spec-settings select')].map(field => field.id);
@@ -21,18 +21,27 @@ const displayStatus = item => item.status === 'review' && item.reviewed ? 'revie
 const statusLabel = status => ({ pending: 'Queued', running: 'Checking', fail: 'Blocked', review: 'Review', pass: 'Passed', reviewed: 'Reviewed' }[status] || status);
 const kindLabel = kind => ({ html5: 'HTML5', image: 'Display', video: 'Video', audio: 'Audio' }[kind] || 'Unknown');
 
+const activeDefaults = () => $('use-defaults').checked ? defaultsFor($('display-profile').value) : { display: {}, image: {}, media: {} };
+
 function readProfile() {
+    const baseline = activeDefaults();
     const base = group => ({ reference: $(`${group}-reference`).value.trim(), version: '2026.10', duration: limit(group, 'duration', `${group}-duration`), width: nullable(`${group}-width`), height: nullable(`${group}-height`) });
     const defaulted = [];
-    const limit = (group, key, id) => { const value = nullable(id); if (value !== null || DEFAULTS[group][key] === undefined) return value; defaulted.push(`${group}.${key}`); return DEFAULTS[group][key]; };
+    const limit = (group, key, id) => { const value = nullable(id); if (value !== null || baseline[group][key] === undefined) return value; defaulted.push(`${group}.${key}`); return baseline[group][key]; };
     const target = limit('media', 'loudness', 'loudness-target');
     const profiles = {
-        display: { ...base('display'), id: $('display-profile').value, name: `HTML5 display / ${$('display-profile').selectedOptions[0].textContent}`, maxKB: limit('display', 'maxKB', 'display-size'), maxFiles: DEFAULTS.display.maxFiles },
+        display: { ...base('display'), id: $('display-profile').value, name: `HTML5 display / ${$('display-profile').selectedOptions[0].textContent}`, maxKB: limit('display', 'maxKB', 'display-size'), maxFiles: baseline.display.maxFiles ?? null },
         image: { ...base('image'), id: 'image', name: 'Images / JPG / GIF / PNG', maxKB: limit('image', 'maxKB', 'image-size'), border: $('image-border').checked },
-        media: { ...base('media'), id: 'media', name: 'Video / audio', mediaMB: nullable('media-size'), videoBitrate: nullable('media-bitrate'), loudness: target, tolerance: nullable('loudness-tolerance') ?? (defaulted.includes('media.loudness') ? DEFAULTS.media.tolerance : 1), truePeak: nullable('true-peak'), videoCodec: $('video-codec').value, audioCodec: $('audio-codec').value, frameRate: nullable('frame-rate'), channels: nullable('audio-channels') }
+        media: { ...base('media'), id: 'media', name: 'Video / audio', mediaMB: nullable('media-size'), videoBitrate: nullable('media-bitrate'), loudness: target, tolerance: nullable('loudness-tolerance') ?? (defaulted.includes('media.loudness') ? baseline.media.tolerance : 1), truePeak: nullable('true-peak'), videoCodec: $('video-codec').value, audioCodec: $('audio-codec').value, frameRate: nullable('frame-rate'), channels: nullable('audio-channels') }
     };
     for (const group of Object.keys(profiles)) profiles[group].defaulted = defaulted.filter(key => key.startsWith(`${group}.`)).map(key => key.split('.')[1]).join(', ');
+    for (const group of Object.keys(profiles)) profiles[group].baseline = $('use-defaults').checked;
     return profiles;
+}
+
+function refreshPlaceholders() {
+    const baseline = activeDefaults();
+    for (const [id, group, key] of [['display-size', 'display', 'maxKB'], ['display-duration', 'display', 'duration'], ['image-size', 'image', 'maxKB'], ['image-duration', 'image', 'duration'], ['loudness-target', 'media', 'loudness']]) $(id).placeholder = baseline[group][key] === undefined ? 'Not set' : `Default ${baseline[group][key]}`;
 }
 
 function badge(item) {
@@ -189,6 +198,7 @@ function sizeCheck(item, profile, bytes = item.file.size) {
 function dimensionCheck(metadata, profile) {
     if (!metadata.width || !metadata.height) return result('Dimensions', 'unverified', 'No usable dimensions found.', 'Set the expected dimensions from the delivery specification.');
     if (!profile.width || !profile.height) {
+        if (!profile.baseline) return result('Dimensions', 'unverified', `${metadata.width} x ${metadata.height}; no expected dimensions selected.`);
         const standard = STANDARD_SIZES.find(size => size.width === metadata.width && size.height === metadata.height);
         return standard ? result('Dimensions', 'pass', `${metadata.width} x ${metadata.height}; standard size: ${standard.name}.`) : result('Dimensions', 'warning', `${metadata.width} x ${metadata.height}; non-standard size.`, 'Verify against the campaign or publisher specification.');
     }
@@ -206,7 +216,7 @@ async function processZip(item, profile, buffer) {
         expanded += zip.files[name]._data?.uncompressedSize || 0;
     }
     if (expanded > LIMITS.expandedBytes) throw new Error('Expanded ZIP exceeds the 50 MB safety limit');
-    item.checks.push(sizeCheck(item, profile, expanded), result('File count', names.length > profile.maxFiles ? 'fail' : 'pass', `${names.length} asset files; maximum ${profile.maxFiles}.`));
+    item.checks.push(sizeCheck(item, profile, expanded), result('File count', profile.maxFiles && names.length > profile.maxFiles ? 'fail' : 'pass', `${names.length} asset files${profile.maxFiles ? `; maximum ${profile.maxFiles}` : ''}.`));
     const htmlFiles = names.filter(name => /\.html?$/i.test(name));
     if (htmlFiles.length !== 1) throw new Error(`Expected one HTML entry point; found ${htmlFiles.length}`);
     item.mainHtml = htmlFiles[0];
@@ -469,7 +479,8 @@ $('sort-order').onchange = () => { renderQueue(); refreshIcons(); };
 for (const button of document.querySelectorAll('[data-filter]')) button.onclick = () => { state.filter = button.dataset.filter; for (const sibling of document.querySelectorAll('[data-filter]')) sibling.setAttribute('aria-pressed', String(sibling === button)); renderQueue(); refreshIcons(); };
 for (const id of fields) $(id).addEventListener('input', () => {
     const group = $(id).closest('[data-group]').dataset.group;
-    const affected = state.items.filter(item => profileForKind({}, item.kind).group === group);
+    const affected = state.items.filter(item => group === 'all' || profileForKind({}, item.kind).group === group);
+    refreshPlaceholders();
     if (affected.some(item => item.id === state.selected)) releasePreview();
     for (const item of affected) { item.profile = null; item.status = 'pending'; item.checks = []; item.reviewed = false; }
     state.dirty = false;
@@ -495,17 +506,27 @@ for (const swatch of document.querySelectorAll('[data-background]')) swatch.oncl
 window.addEventListener('message', event => {
     const preview = state.preview;
     if (!preview || event.source !== preview.frame.contentWindow || event.data?.creativeQA !== preview.token || !['loaded', 'exit', 'error'].includes(event.data.kind)) return;
+    recordPreviewEvent(event.data.kind, event.data.detail);
+});
+window.electronAPI?.onPreviewNavigation(url => {
+    if (!state.preview) return;
+    recordPreviewEvent('exit', `Navigation blocked: ${url}`);
+    // A cancelled navigation leaves the frame on an error page, so restore the creative.
+    setTimeout(() => { const item = selected(); if (item?.kind === 'html5' && state.preview) loadHTMLPreview(item); }, 800);
+});
+function recordPreviewEvent(kind, rawDetail) {
+    const preview = state.preview;
     const item = selected(); if (!item || item.events.length >= 200) return;
-    const detail = String(event.data.detail).slice(0, 2000);
-    item.events.push({ kind: event.data.kind, detail, elapsed: (performance.now() - preview.started) / 1000, at: new Date().toISOString() });
-    if (event.data.kind === 'error') {
+    const detail = String(rawDetail).slice(0, 2000);
+    item.events.push({ kind, detail, elapsed: (performance.now() - preview.started) / 1000, at: new Date().toISOString() });
+    if (kind === 'error') {
         item.checks.push(result('Runtime error', 'fail', detail, 'Inspect the creative source and failed resources.'));
         item.reviewed = false;
         item.status = 'fail';
         renderQueue(); renderInspector(); refreshIcons();
     } else renderEvents();
-    if (event.data.kind === 'exit') showExitToast(detail);
-});
+    if (kind === 'exit') showExitToast(detail);
+}
 for (const name of ['dragenter', 'dragover']) $('dropzone').addEventListener(name, event => { event.preventDefault(); if (!state.running) $('dropzone').classList.add('drag-over'); });
 for (const name of ['dragleave', 'drop']) $('dropzone').addEventListener(name, event => { event.preventDefault(); $('dropzone').classList.remove('drag-over'); if (name === 'drop') addFiles(event.dataTransfer.files); });
 document.addEventListener('dragover', event => event.preventDefault()); document.addEventListener('drop', event => event.preventDefault());
@@ -524,5 +545,6 @@ try {
     localStorage.setItem('sunshine-settings', JSON.stringify(Object.fromEntries(fields.map(id => [id, $(id).type === 'checkbox' ? $(id).checked : $(id).value]))));
     if (localStorage.getItem('sunshine-theme') === 'dark') { document.body.classList.add('dark'); $('theme-toggle').replaceChildren(icon('sun')); }
 } catch (_) {}
+refreshPlaceholders();
 if (!window.electronAPI) $('connection').textContent = 'Browser workspace';
 render();

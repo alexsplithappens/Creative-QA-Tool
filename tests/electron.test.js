@@ -32,8 +32,8 @@ test('native workspace: mixed QA, safe preview, exports, clearing and silent vid
         assert.equal(await page.evaluate(() => Object.hasOwn(JSON.parse(localStorage.getItem('sunshine-settings')), 'reviewer')), false);
         const png = Buffer.from(await page.evaluate(() => { const canvas = document.createElement('canvas'); canvas.width = 300; canvas.height = 250; const context = canvas.getContext('2d'); context.fillStyle = '#f2ce2b'; context.fillRect(0, 0, 300, 250); return canvas.toDataURL('image/png').split(',')[1]; }), 'base64');
         const zip = new JSZip();
-        zip.file('index.html', '<!doctype html><html><head><meta charset="UTF-8"><meta name="ad.size" content="width=300,height=250"><link rel="stylesheet" href="css/style.css"></head><body><button id="exit">Click creative</button><script src="click.js"></script></body></html>');
-        zip.file('click.js', 'var clickTag="https://example.com/landing"; document.getElementById("exit").onclick=function(){window.open(clickTag)};');
+        zip.file('index.html', '<!doctype html><html><head><meta charset="UTF-8"><meta name="ad.size" content="width=300,height=250"><link rel="stylesheet" href="css/style.css"></head><body><button id="exit">Click creative</button><a id="jslink" href="javascript:window.open(window.clickTag)">Link</a><button id="nav">Nav</button><button id="enab">Enabler</button><script src="click.js"></script></body></html>');
+        zip.file('click.js', 'var clickTag="https://example.com/landing"; document.getElementById("exit").onclick=function(){window.open(clickTag)}; window.Enabler={exit:function(){}}; document.getElementById("nav").onclick=function(){location.href="https://example.com/nav"}; document.getElementById("enab").onclick=function(){Enabler.exit("Hero")};');
         zip.file('css/style.css', 'body{margin:0;width:300px;height:250px;background:url(../images/bg.png)}');
         zip.file('images/bg.png', png);
         const validZip = await zip.generateAsync({ type: 'nodebuffer' });
@@ -64,6 +64,12 @@ test('native workspace: mixed QA, safe preview, exports, clearing and silent vid
         const frame = page.frameLocator('#preview-stage iframe');
         await frame.locator('#exit').click();
         await page.waitForFunction(() => document.getElementById('runtime-events').textContent.includes('example.com/landing'));
+        await frame.locator('#jslink').click();
+        await frame.locator('#enab').click();
+        await frame.locator('#nav').click();
+        await page.waitForFunction(() => { const text = document.getElementById('runtime-events').textContent; return (text.match(/EXIT/g) || []).length >= 4 && text.includes('Navigation blocked: https://example.com/nav') && text.includes('Enabler.exit(Hero)'); });
+        assert.equal(await page.locator('.exit-toast').count(), 1);
+        await page.waitForFunction(() => (document.getElementById('runtime-events').textContent.match(/LOADED/g) || []).length >= 2);
         const isolatedFrame = page.frames().find(current => /127\.0\.0\.1/.test(current.url()));
         assert.equal(await isolatedFrame.evaluate(() => typeof window.electronAPI), 'undefined');
         assert.equal(await isolatedFrame.evaluate(() => typeof require), 'undefined');

@@ -85,3 +85,8 @@ test('video codec, channels and frame rate respect the selected specification', 
     assert.equal(checks.find(check => check.label === 'Audio channels').status, 'fail');
     assert.equal(checks.find(check => check.label === 'Frame rate').status, 'fail');
 });
+test('destination presets override the general baseline for display only', () => {
+    assert.equal(qa.defaultsFor('cm360').display.maxFiles, 100);
+    assert.equal(qa.defaultsFor('cm360').image.maxKB, qa.DEFAULTS.image.maxKB);
+    assert.equal(qa.defaultsFor('auto'), qa.DEFAULTS);
+});

@@ -30,6 +30,10 @@ function createWindow() {
     mainWindow.once('ready-to-show', () => mainWindow.show());
     mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     mainWindow.webContents.on('will-navigate', (event, url) => { if (url.split('#')[0] !== indexURL) event.preventDefault(); });
+    // The sandboxed preview frame cannot leave the local service; a refused external load is the creative's exit.
+    mainWindow.webContents.on('did-fail-load', (event, code, description, url, isMainFrame) => {
+        if (!isMainFrame && /^https?:/i.test(url) && new URL(url).hostname !== '127.0.0.1') mainWindow?.webContents.send('preview-navigation-blocked', url.slice(0, 2000));
+    });
     mainWindow.on('closed', () => { mainWindow = null; });
 }
 
