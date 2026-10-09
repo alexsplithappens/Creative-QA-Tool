@@ -132,7 +132,7 @@ function renderQueue() {
     $('cancel-run').hidden = !state.running;
     for (const field of fields) $(field).disabled = state.running;
     const exportable = !state.running && !state.dirty && state.items.length > 0 && state.items.every(item => item.profile);
-    for (const id of ['export-pdf', 'export-json']) $(id).disabled = !exportable;
+    for (const id of ['export-pdf']) $(id).disabled = !exportable;
 }
 
 function checkNode(check) {
@@ -608,7 +608,6 @@ for (const name of ['dragenter', 'dragover']) $('dropzone').addEventListener(nam
 for (const name of ['dragleave', 'drop']) $('dropzone').addEventListener(name, event => { event.preventDefault(); $('dropzone').classList.remove('drag-over'); if (name === 'drop') addFiles(event.dataTransfer.files); });
 document.addEventListener('dragover', event => event.preventDefault()); document.addEventListener('drop', event => event.preventDefault());
 $('export-pdf').onclick = () => { exportPDF(); document.querySelector('.export-menu').open = false; };
-$('export-json').onclick = () => { const evidence = state.items.filter(item => item.profile).map(({ file, kind, profile, metadata, measurement, checks, events, hash, checkedAt, reviewed, reviewedAt, status }) => ({ filename: file.name, kind, profile, metadata, measurement, checks, events, hash, checkedAt, reviewed, reviewedAt, status })); download('Creative_QA_Evidence.json', new Blob([JSON.stringify(evidence, null, 2)], { type: 'application/json' })); document.querySelector('.export-menu').open = false; };
 $('theme-toggle').onclick = () => { document.body.classList.toggle('dark'); try { localStorage.setItem('sunshine-theme', document.body.classList.contains('dark') ? 'dark' : 'light'); } catch (_) {} $('theme-toggle').replaceChildren(icon(document.body.classList.contains('dark') ? 'sun' : 'moon')); refreshIcons(); };
 $('docs-button').onclick = () => { const url = $('display-profile').value === 'dv360' ? 'https://support.google.com/displayvideo/topic/6058302?hl=en' : 'https://support.google.com/campaignmanager/answer/3145300?hl=en'; if (window.electronAPI) window.electronAPI.openDocumentation(url).catch(error => setStatus(error.message)); else window.open(url, '_blank', 'noopener'); };
 try {
