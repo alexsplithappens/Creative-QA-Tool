@@ -80,7 +80,6 @@
     "jszip": "^3.10.1",
     "lucide": "^1.52.0",
     "postcss": "^8.5.29",
-    "postcss-value-parser": "^4.2.0",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "postcss-value-parser": "^4.2.0"
   }
 }

@@ -7,7 +7,6 @@ const { promisify } = require('node:util');
 const { execFile } = require('node:child_process');
 const { _electron } = require('playwright-core');
 const JSZip = require('jszip');
-const XLSX = require('xlsx');
 
 test('native workspace: mixed QA, safe preview, exports, clearing and silent video', { timeout: 120000 }, async () => {
     const root = path.resolve(__dirname, '..');
@@ -82,19 +81,6 @@ test('native workspace: mixed QA, safe preview, exports, clearing and silent vid
             HTMLAnchorElement.prototype.click = function() {};
         });
         await page.locator('.export-menu summary').click();
-        await page.locator('#export-xlsx').click();
-        const bytes = await page.evaluate(async () => Array.from(new Uint8Array(await window.__exportBlob.arrayBuffer())));
-        const workbook = XLSX.read(Buffer.from(bytes), { type: 'buffer' });
-        const rows = XLSX.utils.sheet_to_json(workbook.Sheets['Materials Instructions']);
-        assert.equal(rows.length, 6);
-        assert.equal(rows.find(row => row['File Type'] === 'WAV')['Creative Type'], 'Audio');
-        assert.equal(rows.find(row => row['File Type'] === 'PNG')['Creative Size'], '300x250');
-        assert.equal(rows.find(row => row['File Name'] === 'commented-click.zip')['QA Status'], 'Blocked');
-        assert.ok(rows[0]['SHA-256']);
-        assert.ok(rows.every(row => !Object.hasOwn(row, 'Reviewer')));
-        const appliedSpecs = XLSX.utils.sheet_to_json(workbook.Sheets['Applied Specifications']);
-        assert.ok(appliedSpecs.every(profile => !Object.hasOwn(profile, 'reviewer')));
-        await page.locator('.export-menu summary').click();
         await page.locator('#export-pdf').click();
         await page.waitForFunction(() => window.__exportBlob?.type === 'application/pdf');
         assert.equal(await page.evaluate(async () => (await window.__exportBlob.text()).slice(0, 5)), '%PDF-');
@@ -140,7 +126,7 @@ test('native workspace: mixed QA, safe preview, exports, clearing and silent vid
         await page.locator('#clear-all').click();
         assert.equal(await page.locator('#total-count').textContent(), '0');
         assert.equal(await page.locator('#asset-rows tr').count(), 0);
-        assert.equal(await page.locator('#export-xlsx').isDisabled(), true);
+        assert.equal(await page.locator('#export-pdf').isDisabled(), true);
         await page.locator('#image-size').fill('200'); await page.locator('#image-size').dispatchEvent('change');
         await page.locator('#image-width').fill('300'); await page.locator('#image-width').dispatchEvent('change');
         await page.locator('#image-height').fill('250'); await page.locator('#image-height').dispatchEvent('change');
@@ -151,7 +137,7 @@ test('native workspace: mixed QA, safe preview, exports, clearing and silent vid
         assert.equal(await page.locator('#passed-count').textContent(), '1');
         assert.match(await page.locator('#review-stamp').textContent(), /^Completed \/ /);
         await page.locator('#image-size').fill('1'); await page.locator('#image-size').dispatchEvent('change');
-        assert.equal(await page.locator('#export-xlsx').isDisabled(), true);
+        assert.equal(await page.locator('#export-pdf').isDisabled(), true);
         await page.locator('#run-all').click();
         await page.waitForFunction(() => document.getElementById('run-status').textContent.startsWith('Preflight complete'));
         await page.locator('#review-confirmed').check();
@@ -162,7 +148,7 @@ test('native workspace: mixed QA, safe preview, exports, clearing and silent vid
         await page.locator('#run-all').click();
         await page.locator('#cancel-run').click();
         await page.waitForFunction(() => document.getElementById('run-status').textContent.startsWith('Cancelled.'));
-        assert.equal(await page.locator('#export-xlsx').isDisabled(), true);
+        assert.equal(await page.locator('#export-pdf').isDisabled(), true);
         await page.locator('#clear-all').click();
         const silentVideo = path.join(directory, 'silent.mp4');
         await promisify(execFile)(path.join(root, 'ffmpeg', 'ffmpeg.exe'), ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=yellow:s=320x240:d=0.3', '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', silentVideo]);

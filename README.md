@@ -36,7 +36,7 @@ The preview shows a Click captured notice and logs the exit for window.open call
 
 The inspector provides on-demand previews, fit/actual size, backgrounds, restart, elapsed time, and captured exits/errors. Only the selected HTML5 creative runs. Preview clicks are captured rather than opening landing pages. Studio/Enabler behaviour must also be reviewed in the destination's official preview environment. Isolated previews may restrict APIs that exist in other serving environments.
 
-All three reports use the same check objects. XLSX includes blockers, review items, specification, completion timestamps, and SHA-256. A second worksheet records entered limits. JSON preserves full structured evidence. PDF includes both successful checks and issues. Exports are disabled while running, after specification changes, or when a cancelled batch still contains unchecked assets. Remove unchecked assets or rerun to export. The materials worksheet is not a CM360/DV360 API import template.
+Both reports use the same check objects. The PDF opens with a summary of totals and a one-line-per-asset table, then gives each asset its own page: status, specification and applied limits, checks grouped blocked, review, note, then passed, preview events, and SHA-256. JSON preserves full structured evidence. Exports are disabled while running, after specification changes, or when a cancelled batch still contains unchecked assets. Remove unchecked assets or rerun to export.
 
 ## Boundaries
 
@@ -44,7 +44,7 @@ Static parsing recognises local executable JavaScript, display clickTags, GWD ex
 
 GIF blocks are bounds-checked before gifuct-js parsing, including repeat timing. Border inspection is manual rather than a pixel heuristic presented as certainty. Video metadata is probed before audio measurement so silent clips retain codec/frame-rate data. No RMS-to-LUFS estimate is used. Missing or non-finite measurements remain unverified.
 
-The app does not authenticate to GMP, submit creatives, guarantee platform acceptance, validate VAST redirects, or automatically map placements/backup assets. PDF's built-in font supports Latin-1; use JSON/XLSX for filenames outside that character set.
+The app does not authenticate to GMP, submit creatives, guarantee platform acceptance, validate VAST redirects, or automatically map placements/backup assets. PDF's built-in font supports Latin-1; use JSON for filenames outside that character set.
 
 ## Security And Structure
 

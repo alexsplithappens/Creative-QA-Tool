@@ -3,7 +3,6 @@ const JSZip = require('jszip');
 const postcss = require('postcss');
 const valueParser = require('postcss-value-parser');
 const { jsPDF } = require('jspdf');
-const XLSX = require('xlsx');
 const { DEFAULTS, defaultsFor, STANDARD_SIZES, isTrustedHost, dimensionCheck, LIMITS, result, statusFor, resolveReference, checkVideo, profileForKind } = require('./qa-core');
 const icons = { Moon, Sun, BookOpen, Download, ChevronDown, SlidersHorizontal, FolderUp, Plus, Play, Square, Trash2, Search, Files, ScanSearch, Image: ImageIcon, RotateCcw, Maximize, FileArchive, FileImage, Film, CheckCircle2, CircleAlert, CircleHelp, XCircle, Info, LoaderCircle };
 const state = { items: [], selected: null, filter: 'all', running: false, cancelled: false, worker: null, dirty: false, preview: null, previewVersion: 0, actualSize: false };
@@ -133,7 +132,7 @@ function renderQueue() {
     $('cancel-run').hidden = !state.running;
     for (const field of fields) $(field).disabled = state.running;
     const exportable = !state.running && !state.dirty && state.items.length > 0 && state.items.every(item => item.profile);
-    for (const id of ['export-xlsx', 'export-pdf', 'export-json']) $(id).disabled = !exportable;
+    for (const id of ['export-pdf', 'export-json']) $(id).disabled = !exportable;
 }
 
 function checkNode(check) {
@@ -239,6 +238,7 @@ async function processZip(item, profile, buffer) {
         else if (!node.type || /^(?:module|text\/javascript|application\/javascript)$/i.test(node.type)) scripts.push({ name: item.mainHtml, content: node.textContent, module: node.type === 'module' });
     }
     for (const node of documentHTML.querySelectorAll('*')) for (const attribute of node.attributes) if (/^on/i.test(attribute.name)) scripts.push({ name: `${item.mainHtml}:${attribute.name}`, content: `function handler(event){${attribute.value}}` });
+    for (const node of documentHTML.querySelectorAll('a[href],area[href]')) { const href = node.getAttribute('href').trim(); if (/^javascript:/i.test(href)) scripts.push({ name: `${item.mainHtml}:href`, content: `function handler(){${href.slice(11)}}` }); }
     for (const node of documentHTML.querySelectorAll('style')) styles.push({ name: item.mainHtml, content: node.textContent });
     for (const node of documentHTML.querySelectorAll('[style]')) styles.push({ name: item.mainHtml, content: `.inline {${node.getAttribute('style')}}` });
     for (const name of names) {
@@ -435,28 +435,113 @@ function selectTab(name) {
     refreshIcons();
 }
 
-function exportRows() {
-    return state.items.filter(item => item.profile).map(item => ({ 'File Name': item.file.name, 'File Type': extension(item.file.name).toUpperCase(), 'Creative Type': kindLabel(item.kind), 'Creative Size': item.kind === 'audio' ? 'Audio only' : item.metadata.width ? `${item.metadata.width}x${item.metadata.height}` : 'Unknown', 'Duration (s)': item.metadata.duration ?? '', 'QA Status': statusLabel(displayStatus(item)), 'Blockers': item.checks.filter(check => check.status === 'fail').map(check => `${check.label}: ${check.detail}`).join('; '), 'Review Items': item.checks.filter(check => ['warning', 'unverified', 'note'].includes(check.status)).map(check => `${check.label}: ${check.detail}`).join('; '), 'Specification': item.profile.reference || item.profile.name, 'Rules Version': item.profile.version, 'Manual Review': item.reviewed ? 'Completed' : 'Pending', 'Reviewed At': item.reviewedAt || '', 'Checked At': item.checkedAt, 'SHA-256': item.hash || '', 'Creative Name': `${item.file.name} | ${kindLabel(item.kind)} | ${item.kind === 'audio' ? `${Number(item.metadata.duration || 0).toFixed(2)}s` : item.metadata.width ? `${item.metadata.width}x${item.metadata.height}` : 'Unknown'}` }));
-}
-
 function download(filename, blob) {
     const url = URL.createObjectURL(blob); const link = element('a'); link.href = url; link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+const PDF_COLOURS = { pass: [19, 123, 85], fail: [182, 56, 59], review: [160, 100, 8], note: [90, 98, 112], ink: [34, 38, 44], muted: [99, 106, 117], line: [220, 224, 229], band: [245, 246, 248] };
+const LIMIT_LABELS = { maxKB: 'Max size (KB)', maxFiles: 'Max files', mediaMB: 'Max size (MB)', duration: 'Max duration (s)', width: 'Width (px)', height: 'Height (px)', videoBitrate: 'Max video bitrate (Mbps)', loudness: 'Loudness (LUFS)', tolerance: 'Loudness tolerance (LU)', truePeak: 'Max true peak (dBTP)', videoCodec: 'Video codec', audioCodec: 'Audio codec', frameRate: 'Frame rate (fps)', channels: 'Audio channels' };
+
 function exportPDF() {
-    const doc = new jsPDF(); let position = 18;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const margin = 15, width = 180, bottom = 280;
+    let y = margin;
     const safe = value => String(value).replace(/[^\x20-\x7e\xa0-\xff\n]/g, '?');
-    const line = (text, bold = false) => {
-        doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(bold ? 11 : 9);
-        for (const wrapped of doc.splitTextToSize(safe(text), 178)) { if (position > 277) { doc.addPage(); position = 18; } doc.text(wrapped, 16, position); position += bold ? 6 : 4.5; }
+    const colour = name => doc.setTextColor(...PDF_COLOURS[name]);
+    const ensure = height => { if (y + height > bottom) { doc.addPage(); y = margin; } };
+    const write = (text, { x = margin, size = 9, bold = false, tone = 'ink', maxWidth = width, gap = 1.2, font = 'helvetica' } = {}) => {
+        doc.setFont(font, bold ? 'bold' : 'normal'); doc.setFontSize(size); colour(tone);
+        const lineHeight = size * 0.42;
+        for (const wrapped of doc.splitTextToSize(safe(text), maxWidth)) { ensure(lineHeight); doc.text(wrapped, x, y + lineHeight * 0.8); y += lineHeight; }
+        y += gap;
     };
-    line("Sunshine's Creative QA / Batch Report", true); line(`Generated ${new Date().toLocaleString()} / Rules 2026.10`); line('Local preflight and recorded review; not platform approval.'); position += 5;
-    for (const item of state.items.filter(item => item.profile)) {
-        if (position > 245) { doc.addPage(); position = 18; }
-        line(`${item.file.name} / ${statusLabel(displayStatus(item))}`, true); line(`Specification: ${item.profile.reference || item.profile.name}`); line(`Limits: ${JSON.stringify(item.profile)}`); line(`SHA-256: ${item.hash || 'Unavailable'}`);
-        for (const check of item.checks) line(`[${check.status.toUpperCase()}] ${check.label}: ${check.detail}${check.fix && check.status !== 'pass' ? ` Fix: ${check.fix}` : ''}`);
-        for (const event of item.events) line(`Runtime ${event.elapsed.toFixed(1)}s / ${event.kind}: ${event.detail}`);
-        line(`Manual review: ${item.reviewed ? item.reviewedAt : 'Pending'}`); position += 7;
+    const rule = () => { doc.setDrawColor(...PDF_COLOURS.line); doc.line(margin, y, margin + width, y); y += 3; };
+    const toneFor = status => status === 'fail' ? 'fail' : status === 'pass' ? 'pass' : status === 'note' ? 'note' : 'review';
+    const checkLabel = status => ({ fail: 'FAIL', pass: 'PASS', note: 'NOTE', warning: 'REVIEW', unverified: 'REVIEW' }[status] || 'REVIEW');
+    const pill = (text, tone, x, top) => { doc.setFillColor(...PDF_COLOURS[tone]); doc.roundedRect(x, top, 24, 6, 1.5, 1.5, 'F'); doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(255, 255, 255); doc.text(text, x + 12, top + 4.2, { align: 'center' }); };
+    const items = state.items.filter(item => item.profile);
+    const counts = { pass: items.filter(item => ['pass', 'reviewed'].includes(displayStatus(item))).length, review: items.filter(item => item.status === 'review' && !item.reviewed).length, fail: items.filter(item => item.status === 'fail').length };
+
+    write("Sunshine's Creative QA", { size: 18, bold: true, gap: 1 });
+    write('Batch report', { size: 11, tone: 'muted', gap: 1 });
+    write(`Generated ${new Date().toLocaleString()}  |  Rules ${items[0]?.profile.version || ''}  |  Local preflight and recorded review; not platform approval.`, { size: 8, tone: 'muted', gap: 5 });
+
+    const boxWidth = width / 4 - 3;
+    ensure(22);
+    [['Assets', items.length, 'ink'], ['Passed', counts.pass, 'pass'], ['Review', counts.review, 'review'], ['Blocked', counts.fail, 'fail']].forEach(([label, value, tone], index) => {
+        const x = margin + index * (boxWidth + 4);
+        doc.setFillColor(...PDF_COLOURS.band); doc.roundedRect(x, y, boxWidth, 18, 2, 2, 'F');
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(18); colour(tone); doc.text(String(value), x + 5, y + 10.5);
+        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); colour('muted'); doc.text(label.toUpperCase(), x + 5, y + 15.5);
+    });
+    y += 24;
+
+    write('Summary', { size: 12, bold: true, gap: 2 });
+    const columns = [['File', margin, 84], ['Type', margin + 86, 22], ['Size', margin + 110, 26], ['Status', margin + 138, 42]];
+    ensure(8); doc.setFillColor(...PDF_COLOURS.band); doc.rect(margin, y, width, 6.5, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); colour('muted');
+    for (const [label, x] of columns) doc.text(label.toUpperCase(), x + 1.5, y + 4.4);
+    y += 7.5;
+    for (const item of items) {
+        ensure(7);
+        const status = displayStatus(item);
+        const tone = status === 'fail' ? 'fail' : status === 'pass' || status === 'reviewed' ? 'pass' : 'review';
+        const issues = item.checks.filter(check => check.status === 'fail').length;
+        const nameLines = doc.splitTextToSize(safe(item.file.name), 82);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); colour('ink');
+        doc.text(nameLines, margin + 1.5, y + 3.6);
+        doc.text(kindLabel(item.kind), margin + 87.5, y + 3.6);
+        doc.text(item.kind === 'audio' ? 'Audio' : item.metadata.width ? `${item.metadata.width} x ${item.metadata.height}` : '-', margin + 111.5, y + 3.6);
+        doc.setFont('helvetica', 'bold'); colour(tone); doc.text(`${statusLabel(status)}${issues ? ` (${issues} blocker${issues > 1 ? 's' : ''})` : ''}`, margin + 139.5, y + 3.6);
+        y += 3.6 * nameLines.length + 2.4; doc.setDrawColor(...PDF_COLOURS.line); doc.line(margin, y, margin + width, y); y += 1;
+    }
+
+    for (const item of items) {
+        doc.addPage(); y = margin;
+        const status = displayStatus(item);
+        const tone = status === 'fail' ? 'fail' : status === 'pass' || status === 'reviewed' ? 'pass' : 'review';
+        pill(statusLabel(status).toUpperCase(), tone, margin + width - 24, y);
+        write(item.file.name, { size: 13, bold: true, maxWidth: width - 30, gap: 1 });
+        const facts = [kindLabel(item.kind), item.kind === 'audio' ? null : item.metadata.width ? `${item.metadata.width} x ${item.metadata.height}` : null, sizeText(item.file.size), Number.isFinite(item.metadata.duration) ? `${Number(item.metadata.duration).toFixed(1)} s` : null].filter(Boolean);
+        write(facts.join('  |  '), { size: 9, tone: 'muted', gap: 1 });
+        write(`Checked ${new Date(item.checkedAt).toLocaleString()}  |  Manual review: ${item.reviewed ? `confirmed ${new Date(item.reviewedAt).toLocaleString()}` : 'pending'}`, { size: 8, tone: 'muted', gap: 3 });
+        rule();
+
+        write('Specification', { size: 10, bold: true, gap: 1 });
+        write(item.profile.reference || item.profile.name, { size: 9, gap: 1 });
+        const limits = Object.entries(LIMIT_LABELS).filter(([key]) => item.profile[key] !== null && item.profile[key] !== undefined && item.profile[key] !== '').map(([key, label]) => `${label}: ${item.profile[key]}`);
+        if (item.profile.border) limits.push('Border required');
+        write(limits.length ? limits.join('   |   ') : 'No limits applied.', { size: 8.5, tone: 'muted', gap: 1 });
+        if (item.profile.defaulted) write(`Baseline values used for: ${item.profile.defaulted.split(', ').map(key => LIMIT_LABELS[key] || key).join(', ')}.`, { size: 8, tone: 'muted', gap: 1 });
+        y += 2; rule();
+
+        const order = { fail: 0, warning: 1, unverified: 1, note: 2, pass: 3 };
+        const sorted = [...item.checks].sort((a, b) => (order[a.status] ?? 1) - (order[b.status] ?? 1));
+        write(`Checks (${item.checks.length})`, { size: 10, bold: true, gap: 2 });
+        for (const check of sorted) {
+            const compact = check.status === 'pass';
+            ensure(compact ? 6 : 12);
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); colour(toneFor(check.status)); doc.text(checkLabel(check.status), margin, y + 3);
+            const top = y;
+            write(check.label, { x: margin + 18, size: 9, bold: true, maxWidth: width - 18, gap: 0.2 });
+            write(check.detail, { x: margin + 18, size: 8.5, tone: 'muted', maxWidth: width - 18, gap: check.fix && !compact ? 0.2 : 1.6 });
+            if (check.fix && !compact) write(`Fix: ${check.fix}`, { x: margin + 18, size: 8, tone: 'muted', maxWidth: width - 18, gap: 1.6 });
+            if (y - top < 5) y = top + 5;
+        }
+        if (item.events.length) {
+            y += 2; rule();
+            write(`Preview events (${item.events.length})`, { size: 10, bold: true, gap: 1.5 });
+            for (const event of item.events.slice(0, 40)) write(`${event.elapsed.toFixed(1)}s  ${event.kind.toUpperCase()}  ${event.detail}`, { size: 8, tone: event.kind === 'error' ? 'fail' : 'muted', gap: 0.6 });
+        }
+        y += 3;
+        write(`SHA-256  ${item.hash || 'Unavailable'}`, { size: 7, tone: 'muted', font: 'courier', gap: 0 });
+    }
+
+    const pages = doc.getNumberOfPages();
+    for (let page = 1; page <= pages; page++) {
+        doc.setPage(page); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); colour('muted');
+        doc.text("Sunshine's Creative QA  |  Local preflight; not platform approval", margin, 291);
+        doc.text(`Page ${page} of ${pages}`, margin + width, 291, { align: 'right' });
     }
     doc.save(`Creative_QA_${new Date().toISOString().slice(0, 10)}.pdf`);
 }
@@ -522,7 +607,6 @@ function recordPreviewEvent(kind, rawDetail) {
 for (const name of ['dragenter', 'dragover']) $('dropzone').addEventListener(name, event => { event.preventDefault(); if (!state.running) $('dropzone').classList.add('drag-over'); });
 for (const name of ['dragleave', 'drop']) $('dropzone').addEventListener(name, event => { event.preventDefault(); $('dropzone').classList.remove('drag-over'); if (name === 'drop') addFiles(event.dataTransfer.files); });
 document.addEventListener('dragover', event => event.preventDefault()); document.addEventListener('drop', event => event.preventDefault());
-$('export-xlsx').onclick = () => { const workbook = XLSX.utils.book_new(); const sheet = XLSX.utils.json_to_sheet(exportRows()); sheet['!cols'] = Object.keys(exportRows()[0] || {}).map(name => ({ wch: ['Blockers', 'Review Items', 'SHA-256', 'Creative Name'].includes(name) ? 65 : 26 })); XLSX.utils.book_append_sheet(workbook, sheet, 'Materials Instructions'); const specs = state.items.filter(item => item.profile).map(item => ({ 'File Name': item.file.name, ...item.profile })); XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(specs), 'Applied Specifications'); XLSX.writeFile(workbook, `MI_Sheet_${new Date().toISOString().slice(0, 10)}.xlsx`); document.querySelector('.export-menu').open = false; };
 $('export-pdf').onclick = () => { exportPDF(); document.querySelector('.export-menu').open = false; };
 $('export-json').onclick = () => { const evidence = state.items.filter(item => item.profile).map(({ file, kind, profile, metadata, measurement, checks, events, hash, checkedAt, reviewed, reviewedAt, status }) => ({ filename: file.name, kind, profile, metadata, measurement, checks, events, hash, checkedAt, reviewed, reviewedAt, status })); download('Creative_QA_Evidence.json', new Blob([JSON.stringify(evidence, null, 2)], { type: 'application/json' })); document.querySelector('.export-menu').open = false; };
 $('theme-toggle').onclick = () => { document.body.classList.toggle('dark'); try { localStorage.setItem('sunshine-theme', document.body.classList.contains('dark') ? 'dark' : 'light'); } catch (_) {} $('theme-toggle').replaceChildren(icon(document.body.classList.contains('dark') ? 'sun' : 'moon')); refreshIcons(); };
