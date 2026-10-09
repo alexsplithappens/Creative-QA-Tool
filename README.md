@@ -25,7 +25,7 @@ There are two ways to check:
 
 The reference, entered limits, and any defaulted values are recorded with each result and in the exports. Changing limits invalidates only the affected assets, which then need another run. Previously saved shared limits are not copied into every type.
 
-The destination selects the exit-checking model and applicable structural checks. CM360 also swaps in its own display baseline (10 MB, 100 files, 30 s), which should be confirmed against the current CM360 documentation. Untick Use baseline limits for empty fields to check only what you enter. The baseline is a general guide, not a publisher specification; enter the real limits when you have them.
+The destination selects the exit-checking model and applicable structural checks. CM360 also swaps in its own display baseline (9.5 MB, 100 files, 30 s; images up to 9.5 MB), from the CM360 asset-options page. Images may also be exactly 2x the expected or standard slot size, up to 4000 x 4000 px. Untick Use baseline limits for empty fields to check only what you enter. The baseline is a general guide, not a publisher specification; enter the real limits when you have them.
 
 The preview shows a Click captured notice and logs the exit for window.open calls, links (including javascript: links), Enabler.exit calls, and blocked page navigations. After a blocked navigation the preview reloads.
 

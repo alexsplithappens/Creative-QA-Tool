@@ -87,6 +87,17 @@ test('video codec, channels and frame rate respect the selected specification', 
 });
 test('destination presets override the general baseline for display only', () => {
     assert.equal(qa.defaultsFor('cm360').display.maxFiles, 100);
-    assert.equal(qa.defaultsFor('cm360').image.maxKB, qa.DEFAULTS.image.maxKB);
+    assert.equal(qa.defaultsFor('cm360').image.maxKB, 9728);
     assert.equal(qa.defaultsFor('auto'), qa.DEFAULTS);
+});
+
+test('images may be 2x the expected or standard size but not HTML5', () => {
+    const at = (width, height) => ({ width, height });
+    const expected = { width: 300, height: 250, baseline: true };
+    assert.equal(qa.dimensionCheck(at(600, 500), expected, true).status, 'pass');
+    assert.equal(qa.dimensionCheck(at(600, 500), expected, false).status, 'fail');
+    assert.equal(qa.dimensionCheck(at(600, 400), expected, true).status, 'fail');
+    assert.equal(qa.dimensionCheck(at(600, 500), { baseline: true }, true).status, 'pass');
+    assert.equal(qa.dimensionCheck(at(5000, 4000), { width: 2500, height: 2000 }, true).status, 'fail');
+    assert.equal(qa.dimensionCheck(at(601, 500), { baseline: true }, true).status, 'warning');
 });

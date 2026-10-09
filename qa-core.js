@@ -20,6 +20,25 @@ function isTrustedHost(host) {
     return /(?:^|\.)(?:2mdn\.net|gstatic\.com|googleapis\.com|doubleclick\.net|googlesyndication\.com|googletagservices\.com)$/i.test(host);
 }
 
+function dimensionCheck(metadata, profile, allowDouble = false) {
+    if (!metadata.width || !metadata.height) return result('Dimensions', 'unverified', 'No usable dimensions found.', 'Set the expected dimensions from the delivery specification.');
+    const size = `${metadata.width} x ${metadata.height}`;
+    // CM360 accepts images up to twice the slot size, capped at 4000 x 4000.
+    const doubleOf = (width, height) => allowDouble && metadata.width === width * 2 && metadata.height === height * 2;
+    const tooLarge = allowDouble && (metadata.width > 4000 || metadata.height > 4000);
+    if (!profile.width || !profile.height) {
+        if (!profile.baseline) return result('Dimensions', 'unverified', `${size}; no expected dimensions selected.`);
+        const standard = STANDARD_SIZES.find(entry => entry.width === metadata.width && entry.height === metadata.height);
+        if (standard) return result('Dimensions', 'pass', `${size}; standard size: ${standard.name}.`);
+        const half = STANDARD_SIZES.find(entry => doubleOf(entry.width, entry.height));
+        if (half) return tooLarge ? result('Dimensions', 'fail', `${size}; exceeds the 4000 x 4000 maximum.`) : result('Dimensions', 'pass', `${size}; 2x of standard size ${half.name} (${half.width} x ${half.height}).`);
+        return result('Dimensions', 'warning', `${size}; non-standard size.`, 'Verify against the campaign or publisher specification.');
+    }
+    if (metadata.width === profile.width && metadata.height === profile.height) return result('Dimensions', 'pass', `${size}; expected ${profile.width} x ${profile.height}.`);
+    if (doubleOf(profile.width, profile.height)) return tooLarge ? result('Dimensions', 'fail', `${size}; exceeds the 4000 x 4000 maximum.`) : result('Dimensions', 'pass', `${size}; 2x of expected ${profile.width} x ${profile.height}.`);
+    return result('Dimensions', 'fail', `${size}; expected ${profile.width} x ${profile.height}${allowDouble ? ' or 2x that size' : ''}.`);
+}
+
 function resolveReference(owner, reference) {
     const value = reference.trim();
     if (!value || value.startsWith('#') || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(value)) return null;
@@ -254,7 +273,7 @@ const DEFAULTS = {
 };
 
 // Per-destination baselines; ids without an entry use the general baseline.
-const PRESETS = { cm360: { ...DEFAULTS, display: { maxKB: 10240, duration: 30, maxFiles: 100 } } };
+const PRESETS = { cm360: { ...DEFAULTS, display: { maxKB: 9728, duration: 30, maxFiles: 100 }, image: { ...DEFAULTS.image, maxKB: 9728 } } };
 const defaultsFor = id => PRESETS[id] || DEFAULTS;
 
 const STANDARD_SIZES = [
@@ -267,4 +286,4 @@ const STANDARD_SIZES = [
     [1800, 1000, 'Background Skin'], [1920, 1080, 'Background Skin (Full HD)'], [2560, 1440, 'Background Skin (2K)']
 ].map(([width, height, name]) => ({ width, height, name }));
 
-module.exports = { DEFAULTS, defaultsFor, STANDARD_SIZES, isTrustedHost, LIMITS, result, statusFor, resolveReference, analyzeScripts, analyzeAnimation, inspectGif, checkVideo, profileForKind };
+module.exports = { DEFAULTS, defaultsFor, STANDARD_SIZES, isTrustedHost, dimensionCheck, LIMITS, result, statusFor, resolveReference, analyzeScripts, analyzeAnimation, inspectGif, checkVideo, profileForKind };

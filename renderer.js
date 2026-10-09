@@ -4,7 +4,7 @@ const postcss = require('postcss');
 const valueParser = require('postcss-value-parser');
 const { jsPDF } = require('jspdf');
 const XLSX = require('xlsx');
-const { DEFAULTS, defaultsFor, STANDARD_SIZES, isTrustedHost, LIMITS, result, statusFor, resolveReference, checkVideo, profileForKind } = require('./qa-core');
+const { DEFAULTS, defaultsFor, STANDARD_SIZES, isTrustedHost, dimensionCheck, LIMITS, result, statusFor, resolveReference, checkVideo, profileForKind } = require('./qa-core');
 const icons = { Moon, Sun, BookOpen, Download, ChevronDown, SlidersHorizontal, FolderUp, Plus, Play, Square, Trash2, Search, Files, ScanSearch, Image: ImageIcon, RotateCcw, Maximize, FileArchive, FileImage, Film, CheckCircle2, CircleAlert, CircleHelp, XCircle, Info, LoaderCircle };
 const state = { items: [], selected: null, filter: 'all', running: false, cancelled: false, worker: null, dirty: false, preview: null, previewVersion: 0, actualSize: false };
 const fields = [...document.querySelectorAll('#spec-settings input, #spec-settings select')].map(field => field.id);
@@ -195,15 +195,7 @@ function sizeCheck(item, profile, bytes = item.file.size) {
     return result(item.kind === 'html5' ? 'Expanded ZIP size' : 'Asset size', maximum ? (bytes <= maximum ? 'pass' : 'fail') : 'unverified', `${sizeText(bytes)}${maximum ? `; ${profile.defaulted?.includes(profile.group === 'media' ? 'mediaMB' : 'maxKB') ? 'default' : 'selected'} maximum ${sizeText(maximum)}.` : '; no delivery limit selected.'}`, maximum ? 'Optimise assets if the selected limit is exceeded.' : 'Set the limit from the destination specification.');
 }
 
-function dimensionCheck(metadata, profile) {
-    if (!metadata.width || !metadata.height) return result('Dimensions', 'unverified', 'No usable dimensions found.', 'Set the expected dimensions from the delivery specification.');
-    if (!profile.width || !profile.height) {
-        if (!profile.baseline) return result('Dimensions', 'unverified', `${metadata.width} x ${metadata.height}; no expected dimensions selected.`);
-        const standard = STANDARD_SIZES.find(size => size.width === metadata.width && size.height === metadata.height);
-        return standard ? result('Dimensions', 'pass', `${metadata.width} x ${metadata.height}; standard size: ${standard.name}.`) : result('Dimensions', 'warning', `${metadata.width} x ${metadata.height}; non-standard size.`, 'Verify against the campaign or publisher specification.');
-    }
-    return result('Dimensions', metadata.width === profile.width && metadata.height === profile.height ? 'pass' : 'fail', `${metadata.width} x ${metadata.height}; expected ${profile.width} x ${profile.height}.`);
-}
+
 
 async function processZip(item, profile, buffer) {
     const zip = await JSZip.loadAsync(buffer);
@@ -321,7 +313,7 @@ async function processFile(item, profile) {
             }
             item.metadata = await imageDimensions(item.objectURL);
             if (item.metadata.width * item.metadata.height > 25000000) throw new Error('Image exceeds the 25 megapixel safety limit');
-            item.checks.push(result('Image decoding', 'pass', 'Image decoded successfully.'), dimensionCheck(item.metadata, profile));
+            item.checks.push(result('Image decoding', 'pass', 'Image decoded successfully.'), dimensionCheck(item.metadata, profile, true));
             if (['cm360', 'dv360'].includes(profile.id) && ['svg', 'webp'].includes(extension(item.file.name))) item.checks.push(result('Hosted image format', 'warning', 'Verify SVG/WebP acceptance for this destination; use the required raster format.'));
             item.checks.push(result(profile.border ? 'Required border' : 'Visual inspection', 'unverified', profile.border ? 'A border is required by the selected spec. Inspect the original pixels at actual size.' : 'Check legibility, CTA, safe areas, and final appearance against the brief.'));
         } else {
