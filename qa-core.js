@@ -64,7 +64,7 @@ function memberName(node) {
     return '';
 }
 
-function analyzeScripts(sources, mode = 'display', incomplete = false, trustedRuntime = false) {
+function analyzeScripts(sources, mode = 'display', incomplete = false, trustedRuntime = false, htmlElements = []) {
     const checks = [];
     let declared = false;
     let opener = false;
@@ -117,7 +117,190 @@ function analyzeScripts(sources, mode = 'display', incomplete = false, trustedRu
         checks.push(result('Click destination', candidate ? 'note' : missing, candidate ? 'Supported click destination found. The landing URL is normally set in the ad server.' : 'A supported click destination could not be verified in the local scripts.', candidate ? 'Verify the exit in the destination platform preview.' : 'Use the destination-supported clickTag or Google Web Designer exit implementation.'));
     }
     checks.push(result('Storage APIs', storage.size ? 'warning' : (parseFailed ? 'unverified' : 'pass'), storage.size ? `Storage references: ${[...storage].join(', ')}` : 'No storage API references found in parsed local scripts.', 'Check the destination policy and whether these APIs execute.'));
-    if (insecure.size) checks.push(result('HTTP strings', 'note', `${[...insecure].join(', ')}. Often a placeholder click-through URL that the ad server replaces.`, 'Confirm that fetched resources and landing destinations use HTTPS.'));
+    if (insecure.size) checks.push(result('HTTP strings', 'note', `${[...insecure].join(', ')}. May include default clickTag URLs; ad-server replacement depends on how each URL is used.`, 'Confirm that fetched resources and landing destinations use HTTPS.'));
+    checks.push(...analyzeHardcodedDestinations(sources, parseFailed || trustedRuntime, htmlElements));
+    return checks;
+}
+
+function analyzeHardcodedDestinations(sources, incomplete, htmlElements) {
+    const parsed = [];
+    const globals = new Map();
+    const scopes = new Map();
+    const findings = new Set();
+    const unresolved = new Set();
+    const clickAssignments = new Set();
+    const isClickTag = name => /^(?:(?:window|globalThis)\.)?clickTag\d*$/i.test(name);
+    const scopeFor = (ancestors, blockScoped = false) => [...ancestors].reverse().find(node => /Function/.test(node.type) || node.type === 'Program' || blockScoped && node.type === 'BlockStatement');
+    const bindingsFor = (scope, source) => {
+        if (scope.type === 'Program' && !source.module) return globals;
+        if (!scopes.has(scope)) scopes.set(scope, new Map());
+        return scopes.get(scope);
+    };
+    for (const source of sources) {
+        try {
+            const tree = acorn.parse(source.content, { ecmaVersion: 'latest', sourceType: source.module ? 'module' : 'script', locations: true, allowReturnOutsideFunction: true });
+            parsed.push({ source, tree });
+            walk.ancestor(tree, {
+                VariableDeclarator(node, ancestors) {
+                    if (node.id.type !== 'Identifier') return;
+                    const scope = scopeFor(ancestors, ancestors.at(-2).kind !== 'var');
+                    const bindings = bindingsFor(scope, source);
+                    const entries = bindings.get(node.id.name) || [];
+                    entries.push({ node: node.init, ancestors, source });
+                    bindings.set(node.id.name, entries);
+                },
+                Function(node) {
+                    const bindings = bindingsFor(node, source);
+                    for (const parameter of node.params) {
+                        walk.simple(parameter, { Identifier(identifier) { if (!bindings.has(identifier.name)) bindings.set(identifier.name, [{ node: null }]); } });
+                    }
+                }
+            });
+        } catch (_) { incomplete = true; }
+    }
+    const lookup = (name, ancestors, source) => {
+        for (const scope of [...ancestors].reverse()) {
+            if (!/Function/.test(scope.type) && !['Program', 'BlockStatement'].includes(scope.type)) continue;
+            const entries = bindingsFor(scope, source).get(name);
+            if (entries) return entries;
+        }
+        return null;
+    };
+    for (const { source, tree } of parsed) {
+        walk.ancestor(tree, {
+            AssignmentExpression(node, ancestors) {
+                if (node.operator !== '=' || node.left.type !== 'Identifier' || isClickTag(node.left.name)) return;
+                const entries = lookup(node.left.name, ancestors, source);
+                if (entries) entries.push({ node: node.right, ancestors, source });
+            }
+        });
+    }
+    const elementsFor = (node, ancestors, source, visited = new Set()) => {
+        if (!node || visited.has(node) || visited.size > 30) return [];
+        const next = new Set(visited).add(node);
+        if (node.type === 'ThisExpression' && source.htmlElement !== undefined) return [htmlElements[source.htmlElement]].filter(Boolean);
+        if (node.type === 'Identifier') return (lookup(node.name, ancestors, source) || []).flatMap(entry => elementsFor(entry.node, entry.ancestors || ancestors, entry.source || source, next)).slice(0, 50);
+        if (node.type === 'CallExpression') {
+            const callee = memberName(node.callee);
+            const selector = node.arguments[0]?.value;
+            if (typeof selector !== 'string') return [];
+            if (callee === 'document.createElement') return [{ tag: selector.toLowerCase(), attributes: {} }];
+            if (callee === 'document.getElementById') return htmlElements.filter(element => element.attributes.id === selector);
+            if (callee === 'document.querySelector') {
+                const matches = htmlElements.filter(element => selector.startsWith('#') ? element.attributes.id === selector.slice(1) : selector.startsWith('.') ? (element.attributes.class || '').split(/\s+/).includes(selector.slice(1)) : element.tag === selector.toLowerCase());
+                return matches.slice(0, 1);
+            }
+        }
+        return [];
+    };
+    let resolutionSteps = 0;
+    const strings = (node, ancestors, source, visited = new Set()) => {
+        if (!node || visited.has(node) || visited.size > 30 || ++resolutionSteps > 2000) return [];
+        const next = new Set(visited).add(node);
+        if (node.type === 'Literal') return typeof node.value === 'string' ? [node.value] : [];
+        if (node.type === 'Identifier') {
+            if (isClickTag(node.name)) return [];
+            return (lookup(node.name, ancestors, source) || []).flatMap(entry => strings(entry.node, entry.ancestors || ancestors, entry.source || source, next)).slice(0, 50);
+        }
+        if (node.type === 'MemberExpression') {
+            const property = node.computed ? node.property.value : node.property.name;
+            if (node.object.type === 'MemberExpression' && memberName(node.object).endsWith('.dataset') && typeof property === 'string') {
+                const attribute = `data-${property.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`;
+                return elementsFor(node.object.object, ancestors, source).map(element => element.attributes[attribute]).filter(value => typeof value === 'string');
+            }
+            if (['href', 'action', 'formAction'].includes(property)) return elementsFor(node.object, ancestors, source).map(element => element.attributes[property.toLowerCase()]).filter(value => typeof value === 'string');
+            if (node.object.type === 'Identifier') {
+                const entries = lookup(node.object.name, ancestors, source) || [];
+                return entries.flatMap(entry => entry.node?.type === 'ObjectExpression' ? entry.node.properties.filter(item => item.type === 'Property' && (item.key.name || item.key.value) === property).flatMap(item => strings(item.value, entry.ancestors, entry.source, next)) : []);
+            }
+        }
+        if (node.type === 'BinaryExpression' && node.operator === '+') {
+            const left = strings(node.left, ancestors, source, next);
+            const right = strings(node.right, ancestors, source, next);
+            return left.flatMap(prefix => right.filter(suffix => prefix.length + suffix.length <= 8192).map(suffix => prefix + suffix)).slice(0, 50);
+        }
+        if (node.type === 'TemplateLiteral') {
+            let values = [node.quasis[0].value.cooked || ''];
+            for (let index = 0; index < node.expressions.length; index++) {
+                const parts = strings(node.expressions[index], ancestors, source, next);
+                const suffix = node.quasis[index + 1].value.cooked || '';
+                values = values.flatMap(prefix => parts.filter(part => prefix.length + part.length + suffix.length <= 8192).map(part => prefix + part + suffix)).slice(0, 50);
+            }
+            return values;
+        }
+        if (node.type === 'ConditionalExpression') return [...strings(node.consequent, ancestors, source, next), ...strings(node.alternate, ancestors, source, next)];
+        if (node.type === 'LogicalExpression') return [...strings(node.left, ancestors, source, next), ...strings(node.right, ancestors, source, next)];
+        if (node.type === 'CallExpression' && /^(?:(?:window|globalThis)\.)?(?:atob|decodeURIComponent|decodeURI)$/.test(memberName(node.callee))) {
+            return strings(node.arguments[0], ancestors, source, next).flatMap(value => {
+                try {
+                    const callee = memberName(node.callee).split('.').at(-1);
+                    return [callee === 'atob' ? atob(value) : callee === 'decodeURI' ? decodeURI(value) : decodeURIComponent(value)];
+                } catch (_) { return []; }
+            });
+        }
+        if (node.type === 'CallExpression' && node.callee.type === 'MemberExpression' && memberName(node.callee).endsWith('.getAttribute') && typeof node.arguments[0]?.value === 'string') {
+            return elementsFor(node.callee.object, ancestors, source).map(element => element.attributes[node.arguments[0].value.toLowerCase()]).filter(value => typeof value === 'string');
+        }
+        return [];
+    };
+    const usesClickTag = (node, ancestors, source, visited = new Set()) => {
+        if (!node || visited.has(node) || visited.size > 30) return false;
+        if (isClickTag(memberName(node))) return true;
+        if (node.type !== 'Identifier') return false;
+        const entries = lookup(node.name, ancestors, source);
+        return !!entries?.length && entries.every(entry => usesClickTag(entry.node, entry.ancestors || ancestors, entry.source || source, new Set(visited).add(node)));
+    };
+    const isDestination = value => typeof value === 'string' && !!value.trim() && !/^(?:#|javascript:|data:|blob:|about:)/i.test(value.trim());
+    const inspect = (node, value, ancestors, source, reason, override = false) => {
+        const location = source.location || `${source.name}:${(node.loc?.start.line || 1) + (source.lineOffset || 0)}`;
+        resolutionSteps = 0;
+        const urls = strings(value, ancestors, source).filter(isDestination);
+        for (const url of new Set(urls)) findings.add(`${location}: ${reason} -> ${url}`);
+        const directClickTag = usesClickTag(value, ancestors, source);
+        if (!urls.length && (!directClickTag || override)) unresolved.add(`${location}: ${reason}`);
+    };
+    const inspectAttribute = (node, target, value, ancestors, source) => {
+        const elements = elementsFor(target, ancestors, source);
+        if (elements.length && elements.every(element => !['a', 'area', 'form', 'button', 'input'].includes(element.tag))) return;
+        inspect(node, value, ancestors, source, 'fixed link or form destination');
+    };
+    for (const { source, tree } of parsed) {
+        walk.ancestor(tree, {
+            AssignmentExpression(node, ancestors) {
+                const name = memberName(node.left);
+                if (/^(?:(?:window|globalThis|document|top|parent|self)\.)?location(?:\.href)?$/.test(name)) inspect(node, node.right, ancestors, source, 'fixed navigation');
+                else if (/\.(?:href|action|formAction)$/.test(name)) inspectAttribute(node, node.left.object, node.right, ancestors, source);
+                if (isClickTag(name)) {
+                    const clickName = name.replace(/^(?:window|globalThis)\./, '').toLowerCase();
+                    const initialGlobal = /^(?:window|globalThis)\./.test(name) && !ancestors.some(parent => /Function/.test(parent.type)) && !clickAssignments.has(clickName);
+                    if (!initialGlobal) inspect(node, node.right, ancestors, source, 'clickTag reassignment', true);
+                    clickAssignments.add(clickName);
+                }
+            },
+            VariableDeclarator(node, ancestors) {
+                if (!isClickTag(node.id.name || '')) return;
+                if (source.module || ancestors.some(parent => /Function/.test(parent.type)) || clickAssignments.has((node.id.name || '').toLowerCase())) inspect(node, node.init, ancestors, source, 'local or redeclared clickTag', true);
+                clickAssignments.add((node.id.name || '').toLowerCase());
+            },
+            CallExpression(node, ancestors) {
+                const callee = memberName(node.callee);
+                if (/^(?:(?:window|globalThis|top|parent|self)\.)?open$/.test(callee) && node.arguments.length) inspect(node, node.arguments[0], ancestors, source, 'fixed window.open destination');
+                if (/^(?:(?:window|globalThis|document|top|parent|self)\.)?location\.(?:assign|replace)$/.test(callee)) inspect(node, node.arguments[0], ancestors, source, 'fixed navigation');
+                if (callee === 'Enabler.exitOverride') inspect(node, node.arguments[1], ancestors, source, 'explicit exit override', true);
+                if (/^gwd\.actions\.gwd(?:GoogleAd|GenericAd)\.exit(?:Override)?$/.test(callee) && node.arguments.length > 2) inspect(node, node.arguments[2], ancestors, source, 'explicit exit URL', true);
+                if (/\.setAttribute$/.test(callee) && ['href', 'action', 'formaction'].includes(node.arguments[0]?.value)) inspectAttribute(node, node.callee.object, node.arguments[1], ancestors, source);
+            }
+        });
+    }
+    for (const element of htmlElements) {
+        const attributes = element.tag === 'a' || element.tag === 'area' ? ['href'] : element.tag === 'form' ? ['action'] : ['button', 'input'].includes(element.tag) ? ['formaction'] : [];
+        for (const attribute of attributes) {
+            const value = element.attributes[attribute];
+            if (isDestination(value)) findings.add(`${element.location}: fixed ${element.tag}[${attribute}] -> ${value}`);
+        }
+    }
+    const checks = [result('Hardcoded click destinations', findings.size ? 'warning' : incomplete || unresolved.size ? 'unverified' : 'pass', findings.size ? [...findings].join('\n') : incomplete || unresolved.size ? 'No fixed destination confirmed; some click code could not be fully analysed.' : 'No hardcoded click destinations found in the inspected local code.', 'Use the platform-supported clickTag or configured exit instead of a fixed navigation URL. Verify the final destination in CM360/platform preview.')];
+    if (unresolved.size) checks.push(result('Dynamic click destinations', 'unverified', [...unresolved].join('\n'), 'Static analysis could not resolve these destinations. Verify that they honour the configured landing URL in the destination platform preview.'));
     return checks;
 }
 

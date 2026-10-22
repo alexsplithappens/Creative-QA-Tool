@@ -31,7 +31,7 @@ test('native workspace: mixed QA, safe preview, exports, clearing and silent vid
         assert.equal(await page.evaluate(() => Object.hasOwn(JSON.parse(localStorage.getItem('sunshine-settings')), 'reviewer')), false);
         const png = Buffer.from(await page.evaluate(() => { const canvas = document.createElement('canvas'); canvas.width = 300; canvas.height = 250; const context = canvas.getContext('2d'); context.fillStyle = '#f2ce2b'; context.fillRect(0, 0, 300, 250); return canvas.toDataURL('image/png').split(',')[1]; }), 'base64');
         const zip = new JSZip();
-        zip.file('index.html', '<!doctype html><html><head><meta charset="UTF-8"><meta name="ad.size" content="width=300,height=250"><link rel="stylesheet" href="css/style.css"></head><body><button id="exit">Click creative</button><a id="jslink" href="javascript:window.open(window.clickTag)">Link</a><button id="nav">Nav</button><button id="enab">Enabler</button><script src="click.js"></script></body></html>');
+        zip.file('index.html', '<!doctype html><html><head><meta charset="UTF-8"><meta name="ad.size" content="width=300,height=250"><link rel="stylesheet" href="css/style.css"></head><body><button id="exit">Click creative</button><a id="jslink" href="javascript:window.open(window.clickTag)">Link</a><button id="nav">Nav</button><button id="enab">Enabler</button><a id="fixed" href="https://fixed.example/link">Fixed link</a><form action="https://fixed.example/form"></form><button id="data-exit" data-url="https://fixed.example/data" onclick="window.open(this.dataset.url)">Data exit</button><script src="click.js"></script></body></html>');
         zip.file('click.js', 'var clickTag="https://example.com/landing"; document.getElementById("exit").onclick=function(){window.open(clickTag)}; window.Enabler={exit:function(){}}; document.getElementById("nav").onclick=function(){location.href="https://example.com/nav"}; document.getElementById("enab").onclick=function(){Enabler.exit("Hero")};');
         zip.file('css/style.css', 'body{margin:0;width:300px;height:250px;background:url(../images/bg.png)}');
         zip.file('images/bg.png', png);
@@ -55,8 +55,12 @@ test('native workspace: mixed QA, safe preview, exports, clearing and silent vid
         await page.waitForFunction(() => document.getElementById('run-status').textContent.startsWith('Preflight complete'));
         assert.equal(await page.locator('#total-count').textContent(), '6');
         assert.equal(await page.locator('#failed-count').textContent(), '4');
-        assert.equal(await page.locator('#review-count').textContent(), '1');
+        assert.equal(await page.locator('#review-count').textContent(), '2');
         assert.match(await page.locator('#checks').textContent(), /Click destination/);
+        const clickChecks = await page.locator('#checks').textContent();
+        assert.match(clickChecks, /Hardcoded click destinations/);
+        for (const destination of ['https://example.com/nav', 'https://fixed.example/link', 'https://fixed.example/form', 'https://fixed.example/data']) assert.ok(clickChecks.includes(destination), destination);
+        assert.doesNotMatch(clickChecks, /Dynamic click destinations/);
         await page.locator('#preview-tab').click();
         await page.getByRole('button', { name: 'Load preview' }).click();
         await page.waitForSelector('#preview-stage iframe');

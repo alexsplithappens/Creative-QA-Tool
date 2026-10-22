@@ -150,3 +150,10 @@ footer { display:flex; justify-content:space-between; gap:16px; padding:16px 36p
 
 #help-dialog { max-width:560px; padding:22px 24px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--ink); }#help-dialog::backdrop { background:rgba(0,0,0,.45); }#help-dialog h2 { margin:0 0 10px; font-size:16px; }#help-dialog ul { margin:0 0 12px; padding-left:18px; font-size:12px; line-height:1.5; }#help-dialog li { margin-bottom:6px; }#help-feedback { min-height:18px; margin:0 0 10px; font-size:12px; color:var(--muted); }.dialog-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .feedback-note { margin:0 0 10px; padding:9px 12px; border-left:3px solid var(--yellow); background:var(--subtle); font-size:12px; line-height:1.5; }
+.update-banner { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:8px 36px; background:var(--yellow); color:#242014; font-size:13px; font-weight:600; border-bottom:1px solid #d5b525; }
+.update-banner[hidden], .update-banner [hidden] { display:none; }
+.update-banner button { min-height:28px; padding:2px 12px; }
+.update-banner details { font-weight:400; }
+.update-banner summary { cursor:pointer; font-weight:600; }
+.update-banner pre { margin:6px 0 0; max-width:640px; max-height:160px; overflow:auto; white-space:pre-wrap; font:inherit; }
+.update-banner.blocking { background:var(--fail-bg); color:var(--fail); border-bottom-color:var(--fail); }

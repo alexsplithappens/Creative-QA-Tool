@@ -48,6 +48,8 @@ function badge(item) {
     return element('span', `badge ${status}`, statusLabel(status));
 }
 
+let updateRequired = false;
+let updateReady = false;
 function setStatus(message) { $('run-status').textContent = message; }
 
 function releasePreview() {
@@ -126,7 +128,7 @@ function renderQueue() {
     $('review-count').textContent = state.items.filter(item => item.status === 'review' && !item.reviewed).length;
     $('passed-count').textContent = state.items.filter(item => ['pass', 'reviewed'].includes(displayStatus(item))).length;
     $('batch-count').textContent = `${state.items.length} file${state.items.length === 1 ? '' : 's'}`;
-    $('run-all').disabled = state.running || !state.items.length;
+    $('run-all').disabled = state.running || !state.items.length || updateRequired;
     $('allFiles').disabled = state.running;
     $('clear-all').disabled = state.running || !state.items.length;
     $('cancel-run').hidden = !state.running;
@@ -213,6 +215,8 @@ async function processZip(item, profile, buffer) {
     item.mainHtml = htmlFiles[0];
     const html = await zip.files[item.mainHtml].async('string');
     const documentHTML = new DOMParser().parseFromString(html, 'text/html');
+    const htmlNodes = [...documentHTML.querySelectorAll('*')];
+    const htmlElements = htmlNodes.map((node, index) => ({ tag: node.tagName.toLowerCase(), attributes: Object.fromEntries([...node.attributes].map(attribute => [attribute.name, attribute.value])), location: `${item.mainHtml}: <${node.tagName.toLowerCase()}${node.id ? ` id="${node.id}"` : ''}> (element ${index + 1})` }));
     const sizeMeta = documentHTML.querySelector('meta[name="ad.size"]')?.getAttribute('content') || '';
     const width = Number(sizeMeta.match(/width\s*=\s*(\d+)/i)?.[1]);
     const height = Number(sizeMeta.match(/height\s*=\s*(\d+)/i)?.[1]);
@@ -235,16 +239,16 @@ async function processZip(item, profile, buffer) {
     }
     for (const node of documentHTML.querySelectorAll('script')) {
         if (node.src) { if (/^(https?:)?\/\//i.test(node.getAttribute('src'))) externalScripts.add(node.getAttribute('src')); }
-        else if (!node.type || /^(?:module|text\/javascript|application\/javascript)$/i.test(node.type)) scripts.push({ name: item.mainHtml, content: node.textContent, module: node.type === 'module' });
+        else if (!node.type || /^(?:module|text\/javascript|application\/javascript)$/i.test(node.type)) scripts.push({ name: item.mainHtml, content: node.textContent, module: node.type === 'module', lineOffset: html.slice(0, Math.max(0, html.indexOf(node.textContent))).split('\n').length - 1 });
     }
-    for (const node of documentHTML.querySelectorAll('*')) for (const attribute of node.attributes) if (/^on/i.test(attribute.name)) scripts.push({ name: `${item.mainHtml}:${attribute.name}`, content: `function handler(event){${attribute.value}}` });
-    for (const node of documentHTML.querySelectorAll('a[href],area[href]')) { const href = node.getAttribute('href').trim(); if (/^javascript:/i.test(href)) scripts.push({ name: `${item.mainHtml}:href`, content: `function handler(){${href.slice(11)}}` }); }
+    for (const [index, node] of htmlNodes.entries()) for (const attribute of node.attributes) if (/^on/i.test(attribute.name)) scripts.push({ name: `${item.mainHtml}:${attribute.name}`, content: `function handler(event){${attribute.value}}`, htmlElement: index, location: `${htmlElements[index].location} ${attribute.name}` });
+    for (const node of documentHTML.querySelectorAll('a[href],area[href]')) { const href = node.getAttribute('href').trim(); if (/^javascript:/i.test(href)) { const index = htmlNodes.indexOf(node); scripts.push({ name: `${item.mainHtml}:href`, content: `function handler(){${href.slice(11)}}`, htmlElement: index, location: `${htmlElements[index].location} href` }); } }
     for (const node of documentHTML.querySelectorAll('style')) styles.push({ name: item.mainHtml, content: node.textContent });
     for (const node of documentHTML.querySelectorAll('[style]')) styles.push({ name: item.mainHtml, content: `.inline {${node.getAttribute('style')}}` });
     for (const name of names) {
-        if (/\.js$/i.test(name)) {
+        if (/\.(?:js|mjs|cjs)$/i.test(name)) {
             const isModule = [...documentHTML.querySelectorAll('script[type="module"][src]')].some(script => { try { return resolveReference(item.mainHtml, script.getAttribute('src')) === name; } catch (_) { return false; } });
-            scripts.push({ name, content: await zip.files[name].async('string'), module: isModule });
+            scripts.push({ name, content: await zip.files[name].async('string'), module: isModule || /\.mjs$/i.test(name) });
         }
         if (/\.css$/i.test(name)) styles.push({ name, content: await zip.files[name].async('string') });
     }
@@ -271,7 +275,7 @@ async function processZip(item, profile, buffer) {
     const foreignScripts = [...externalScripts].filter(source => { try { return !isTrustedHost(new URL(source, 'https://preview.invalid').hostname); } catch (_) { return true; } });
     if (domains.size) item.checks.push(result('External resources', foreignDomains.length ? 'note' : 'pass', foreignDomains.length ? `${foreignDomains.join(', ')}. Confirm destination policy, availability, and network behaviour.` : `Google-hosted only: ${[...domains].join(', ')}.`));
     if (externalScripts.size) item.checks.push(result('Remote JavaScript', foreignScripts.length ? 'note' : 'pass', foreignScripts.length ? `${foreignScripts.join(', ')} is not fetched or approved by static analysis.` : 'Scripts load from Google-hosted runtime libraries.'));
-    item.checks.push(...await workerCheck({ type: 'scripts', scripts, styles, mode: profile.id === 'studio' ? 'studio' : profile.id === 'auto' ? 'auto' : 'display', duration: profile.duration, incomplete: foreignScripts.length > 0, trustedRuntime: externalScripts.size > foreignScripts.length }));
+    item.checks.push(...await workerCheck({ type: 'scripts', scripts, htmlElements, styles, mode: profile.id === 'studio' ? 'studio' : profile.id === 'auto' ? 'auto' : 'display', duration: profile.duration, incomplete: foreignScripts.length > 0, trustedRuntime: externalScripts.size > foreignScripts.length }));
 }
 
 async function imageDimensions(url) {
@@ -655,4 +659,32 @@ $('close-help').onclick = () => $('help-dialog').close();
 $('copy-diagnostics').onclick = () => window.electronAPI?.copyDiagnostics().then(() => helpFeedback('Diagnostics copied. Paste them into your email.')).catch(error => helpFeedback(error.message));
 $('open-logs').onclick = () => window.electronAPI?.openLogFolder().catch(error => helpFeedback(error.message));
 if (!window.electronAPI) $('connection').textContent = 'Browser workspace';
+function showUpdateBanner(text, { restartLabel, notes } = {}) {
+    $('update-text').textContent = text;
+    $('update-restart').hidden = !restartLabel;
+    if (restartLabel) $('update-restart').textContent = restartLabel;
+    $('update-notes').hidden = !notes;
+    $('update-notes-body').textContent = notes || '';
+    $('update-banner').hidden = false;
+}
+if (window.electronAPI) {
+    $('update-restart').onclick = () => (updateReady || !updateRequired ? window.electronAPI.installUpdate() : window.electronAPI.checkForUpdates()).catch(error => setStatus(error.message));
+    $('check-updates').onclick = () => { helpFeedback('Checking for updates...'); window.electronAPI.checkForUpdates().then(() => helpFeedback('Update check finished. Any update will appear at the top of the workspace.')).catch(error => helpFeedback(error.message)); };
+    window.electronAPI.onUpdateStatus(status => {
+        if (status.state === 'ready') { updateReady = true; if (updateRequired) { $('update-text').textContent = `Update v${status.version} downloaded. Restart to continue.`; $('update-restart').textContent = 'Restart now'; return; } }
+        if (updateRequired) return;
+        if (status.state === 'downloading') showUpdateBanner(`Downloading update ${status.percent ?? 0}%`);
+        else if (status.state === 'ready') showUpdateBanner(`Update v${status.version} ready`, { restartLabel: 'Restart now', notes: status.notes });
+        else if (status.state === 'error') helpFeedback(`Update check failed: ${status.message || 'unknown error'}`);
+        else if (status.state === 'none') helpFeedback('You are on the latest version.');
+    });
+    window.electronAPI.onUpdateRequired(info => {
+        updateRequired = true;
+        showUpdateBanner(`This version is no longer supported. ${info?.message || `Update to v${info?.minVersion} or later to continue.`}`, { restartLabel: 'Restart / Update' });
+        $('update-banner').classList.add('blocking');
+        render();
+    });
+} else {
+    $('check-updates').hidden = true;
+}
 render();

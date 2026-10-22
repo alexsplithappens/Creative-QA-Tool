@@ -1,6 +1,6 @@
 {
   "name": "sunshines-creative-qa-tool",
-  "version": "2.1.0",
+  "version": "2.2.3",
   "description": "Sunshine's Creative QA Tool - HTML5, Image, and Video QA",
   "main": "main.js",
   "scripts": {
@@ -8,7 +8,9 @@
     "build:ui": "esbuild renderer.js --bundle --platform=browser --outfile=assets/app.bundle.js --minify && esbuild qa-worker.js --bundle --platform=browser --outfile=assets/qa-worker.bundle.js --minify",
     "test": "node --test tests/*.test.js",
     "build": "npm run build:ui && electron-builder",
-    "build:win": "npm run build:ui && electron-builder --win"
+    "build:win": "npm run build:ui && electron-builder --win",
+    "update": "node scripts/release.js",
+    "release": "node scripts/release.js"
   },
   "keywords": [
     "qa",
@@ -21,7 +23,7 @@
   "license": "MIT",
   "build": {
     "appId": "com.sunshine.creative-qa",
-    "productName": "Sunshine's Creative QA Tool",
+    "productName": "Sunshines Creative QA Tool",
     "win": {
       "target": [
         {
@@ -33,11 +35,20 @@
       ],
       "icon": "icon.ico"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "alexsplithappens",
+        "repo": "creative-qa-releases",
+        "releaseType": "draft"
+      }
+    ],
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
+      "perMachine": false,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "artifactName": "Sunshines-Creative-QA-Tool-Setup-${version}.${ext}"
     },
     "extraResources": [
       {
@@ -75,6 +86,7 @@
   "dependencies": {
     "acorn": "^8.19.0",
     "acorn-walk": "^8.3.5",
+    "electron-updater": "^6.6.2",
     "gifuct-js": "^2.1.2",
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",

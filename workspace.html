@@ -14,6 +14,11 @@
         <span class="workspace-label">QA in style, with Sunshine's Creative QA Tool</span>
         <div class="header-actions"><span id="connection" class="connection">Local workspace</span><button id="help-button" class="text-button"><i data-lucide="circle-help"></i>Help</button><button id="theme-toggle" class="icon-button" aria-label="Switch colour theme" title="Switch colour theme"><i data-lucide="moon"></i></button></div>
     </header>
+    <div id="update-banner" class="update-banner" role="status" hidden>
+        <span id="update-text"></span>
+        <button id="update-restart" class="button primary" hidden></button>
+        <details id="update-notes" hidden><summary>What's new</summary><pre id="update-notes-body"></pre></details>
+    </div>
     <main>
         <section class="page-heading"><div><div class="eyebrow">REVIEW</div><h1>Creative Review</h1></div><div class="heading-actions"><button id="docs-button" class="text-button"><i data-lucide="book-open"></i>Specifications</button><details class="export-menu"><summary><i data-lucide="download"></i>Export<i data-lucide="chevron-down"></i></summary><div class="menu-items"><button id="export-pdf" disabled>QA report (.pdf)</button></div></details></div></section>
         <section class="spec-bar" aria-label="Optional QA settings">
@@ -88,6 +93,7 @@
         <p class="feedback-note">For any feedback or bugs you have encountered, please email <strong>alex.pearce@omc.com</strong>. If something went wrong, click Copy diagnostics and paste the result into your email.</p>
         <p id="help-feedback" role="status"></p>
         <div class="dialog-actions">
+            <button id="check-updates" class="button secondary">Check for updates</button>
             <button id="copy-diagnostics" class="button secondary">Copy diagnostics</button>
             <button id="open-logs" class="button secondary">Open log folder</button>
             <button id="close-help" class="button secondary">Close</button>

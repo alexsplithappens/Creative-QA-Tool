@@ -26,6 +26,78 @@ test('external executable click code is recognised but still needs runtime revie
 test('function-local clickTag is not an injectable global', () => {
     assert.equal(qa.analyzeScripts([{ name: 'click.js', content: 'function click(){var clickTag="https://example.com"; window.open(clickTag)}' }])[0].status, 'fail');
 });
+test('hardcoded destinations are independent of a supported clickTag', () => {
+    const checks = qa.analyzeScripts([{ name: 'click.js', content: 'var clickTag="https://example.com"; window.open(clickTag);\nwindow.open("https://fixed.example");' }]);
+    assert.equal(checks[0].status, 'note');
+    const hardcoded = checks.find(check => check.label === 'Hardcoded click destinations');
+    assert.equal(hardcoded.status, 'warning');
+    assert.match(hardcoded.detail, /click.js:2.*https:\/\/fixed.example/);
+    assert.equal(qa.statusFor(checks), 'review');
+});
+test('normal clickTag defaults and asset URLs do not trigger destination warnings', () => {
+    const checks = qa.analyzeScripts([{ name: 'click.js', content: 'var clickTag="https://example.com"; const image="https://cdn.example/image.png"; window.open(clickTag);' }]);
+    assert.equal(checks.find(check => check.label === 'Hardcoded click destinations').status, 'pass');
+});
+test('fixed configuration, constructed and encoded URLs are detected at navigation sinks', () => {
+    for (const content of [
+        'const settings={destination:"https://fixed.example"}; location.assign(settings.destination);',
+        'const domain="fixed.example"; location.href="https://"+domain+"/landing";',
+        'const domain="fixed.example"; location.replace(`https://${domain}/landing`);',
+        'window.open(atob("aHR0cHM6Ly9maXhlZC5leGFtcGxl"));',
+        'Enabler.exitOverride("Exit", "https://fixed.example");',
+        'var clickTag="https://default.example"; function click(){clickTag="https://fixed.example"; window.open(clickTag)}'
+    ]) {
+        const check = qa.analyzeScripts([{ name: 'click.js', content }]).find(check => check.label === 'Hardcoded click destinations');
+        assert.equal(check.status, 'warning', content);
+        assert.match(check.detail, /https:\/\/fixed.example/, content);
+    }
+});
+test('unresolved destinations and unavailable code require review', () => {
+    assert.equal(qa.analyzeScripts([{ name: 'click.js', content: 'window.open(getDestination());' }]).find(check => check.label === 'Hardcoded click destinations').status, 'unverified');
+    assert.equal(qa.analyzeScripts([], 'display', true).find(check => check.label === 'Hardcoded click destinations').status, 'unverified');
+    assert.equal(qa.analyzeScripts([], 'display', false, true).find(check => check.label === 'Hardcoded click destinations').status, 'unverified');
+});
+test('HTML links, forms and data attribute destinations are inspected', () => {
+    const htmlElements = [
+        { tag: 'a', attributes: { id: 'exit', href: 'https://fixed.example/link', 'data-url': 'https://fixed.example/data' }, location: 'index.html: <a id="exit">' },
+        { tag: 'form', attributes: { action: '/landing' }, location: 'index.html: <form>' },
+        { tag: 'button', attributes: { formaction: 'landing.html' }, location: 'index.html: <button>' },
+        { tag: 'img', attributes: { src: 'https://cdn.example/image.png' }, location: 'index.html: <img>' }
+    ];
+    const checks = qa.analyzeScripts([{ name: 'click.js', content: 'const button=document.getElementById("exit"); window.open(button.dataset.url); location.assign(button.getAttribute("data-url"));' }], 'display', false, false, htmlElements);
+    const hardcoded = checks.find(check => check.label === 'Hardcoded click destinations');
+    assert.equal(hardcoded.status, 'warning');
+    for (const destination of ['https://fixed.example/link', 'https://fixed.example/data', '/landing', 'landing.html']) assert.ok(hardcoded.detail.includes(destination));
+    assert.match(hardcoded.detail, /click.js:1/);
+    assert.doesNotMatch(hardcoded.detail, /cdn.example/);
+});
+test('assignments, scoped variables and cross-file configuration are resolved conservatively', () => {
+    const checks = qa.analyzeScripts([
+        { name: 'config.js', content: 'const destination="https://fixed.example";' },
+        { name: 'click.js', content: 'window.open(destination); let url; url="https://assigned.example"; location.replace(url); function click(destination){window.open(destination)}' }
+    ]);
+    const hardcoded = checks.find(check => check.label === 'Hardcoded click destinations');
+    assert.match(hardcoded.detail, /https:\/\/fixed.example/);
+    assert.match(hardcoded.detail, /https:\/\/assigned.example/);
+    assert.equal(checks.find(check => check.label === 'Dynamic click destinations').status, 'unverified');
+});
+test('clickTag aliases and fragment links do not produce hardcoded warnings', () => {
+    const checks = qa.analyzeScripts([{ name: 'click.js', content: 'window.clickTag="https://default.example"; const destination=window.clickTag; window.open(destination);' }], 'display', false, false, [{ tag: 'a', attributes: { href: '#exit' }, location: 'index.html: <a>' }]);
+    assert.equal(checks.find(check => check.label === 'Hardcoded click destinations').status, 'pass');
+});
+test('stylesheet href assignments are not click destinations', () => {
+    const checks = qa.analyzeScripts([{ name: 'assets.js', content: 'const link=document.createElement("link"); link.href="https://cdn.example/style.css"; link.setAttribute("href", "https://cdn.example/other.css");' }]);
+    assert.equal(checks.find(check => check.label === 'Hardcoded click destinations').status, 'pass');
+});
+test('alternate global clickTag assignments and DOM link setters are flagged', () => {
+    const checks = qa.analyzeScripts([{ name: 'click.js', content: 'window.clickTag="https://default.example"; globalThis.clickTag="https://fixed.example"; const link=document.createElement("a"); link.href="https://fixed.example/link"; link.setAttribute("href", "https://fixed.example/other");' }]);
+    const hardcoded = checks.find(check => check.label === 'Hardcoded click destinations');
+    assert.equal(hardcoded.status, 'warning');
+    assert.match(hardcoded.detail, /clickTag reassignment -> https:\/\/fixed.example/);
+    assert.match(hardcoded.detail, /https:\/\/fixed.example\/link/);
+    assert.match(hardcoded.detail, /https:\/\/fixed.example\/other/);
+    assert.doesNotMatch(hardcoded.detail, /default.example/);
+});
 test('Studio exits do not require display clickTag or untracked fallback', () => {
     assert.equal(qa.analyzeScripts([{ name: 'exit.js', content: 'Enabler.exit("Primary exit");' }], 'studio')[0].status, 'note');
 });

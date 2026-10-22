@@ -44,6 +44,10 @@ The PDF report opens with a summary of totals and a one-line-per-asset table, th
 
 Static parsing recognises local executable JavaScript, display clickTags, GWD exit APIs, and Studio exits. Remote scripts are not fetched or approved. HTML/CSS references are resolved relative to their owning files with case-sensitive names. CSS duration includes repetitions/delays, but cascades, dynamic JavaScript animation, and the final frame still need playback review.
 
+The independent hardcoded click destination check inspects HTML links/forms, inline handlers, and local `.js`, `.mjs`, and `.cjs` files. It warns on fixed navigation URLs, explicit exit URLs, and clickTag reassignments, including straightforward variables, object configuration, concatenation, templates, encoded strings, and HTML data attributes used by navigation code. Findings identify the script file/line or HTML element and destination. Normal global clickTag defaults and asset URLs are not treated as hardcoded click destinations; a supported clickTag elsewhere does not suppress warnings. Resolution is conservative, so a warning can include an inactive branch or unused local file and needs review rather than automatic rejection.
+
+Unresolved destinations or unparsed/unavailable script code require review rather than claiming no hardcoded URLs exist. Static analysis does not execute creatives or fully trace arbitrary functions, runtime configuration/JSON, remote scripts, redirects, or obfuscated code. Always verify landing-URL overrides in the destination platform's preview; the local preview captures clicks but does not prove CM360 override behaviour.
+
 GIF blocks are bounds-checked before gifuct-js parsing, including repeat timing. Border inspection is manual rather than a pixel heuristic presented as certainty. Video metadata is probed before audio measurement so silent clips retain codec/frame-rate data. No RMS-to-LUFS estimate is used. Missing or non-finite measurements remain unverified.
 
 The app does not authenticate to GMP, submit creatives, guarantee platform acceptance, validate VAST redirects, or automatically map placements/backup assets. PDF text outside Latin-1 (for example Hindi or Chinese filenames) is drawn with the system fonts and embedded as images, so it prints correctly but is not selectable.
@@ -62,3 +66,31 @@ The Electron renderer is sandboxed without Node integration. IPC accepts only th
 Safety caps are 500 MB per media asset, 50 MB per expanded ZIP, 1000 ZIP files, and 25 megapixels for decoded image/preview dimensions. These are application safety limits, not advertising delivery specifications.
 
 The interface retains yellow as an action/selection accent with readable neutral text. The primary button adapts the restrained depth/pressed treatment from Uiverse; attribution is in `THIRD_PARTY_NOTICES.md`.
+## Releasing
+
+Updates are published to the public releases-only repo `alexsplithappens/creative-qa-releases` and installed automatically by the app (electron-updater). The source code is never uploaded.
+
+**To release, save your changes and run `npm run update`** (not `npm update`, which upgrades dependencies instead). It will:
+
+1. Ask for your GitHub token the first time only, check it works, and save it outside the project (`%USERPROFILE%\.creative-qa-release-token`) so it can never be bundled into the app.
+2. Show the current and next version (patch bump by default; use `npm run update -- minor` or `-- major`), ask for a one-line "What's new" note, and ask you to confirm.
+3. Bump the version, run the tests, build the UI and installer, and upload the installer, blockmap and `latest.yml` to a draft release.
+4. Check all three files arrived complete, publish the release, mark it Latest, and confirm GitHub reports it as Latest.
+
+If anything fails, the version number is put back and nothing is published; fix the problem and run it again (a leftover draft is cleaned up automatically). When the token expires, the script says so and asks for a new one.
+
+Differential (blockmap) updates are enabled, so unchanged files such as the bundled ffmpeg are not re-downloaded.
+
+### Minimum version
+
+`policy.json` on the `main` branch of the releases repo controls the minimum supported version:
+
+```json
+{ "minVersion": "2.1.0", "message": "Please update to continue." }
+```
+
+On startup the app fetches it (5-second timeout). If the running version is lower, the app shows a blocking message and disables Run preflight until updated. If the fetch fails, the app stays usable (fail open).
+
+### Upgrading from a per-machine install
+
+The installer is now per-user (no admin rights, no install directory choice). Anyone on a previous per-machine install should uninstall it before installing this version.

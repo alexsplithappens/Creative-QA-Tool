@@ -10,6 +10,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAppInfo: () => ipcRenderer.invoke('app-info'),
     logError: message => ipcRenderer.invoke('log-error', String(message).slice(0, 2000)),
     copyDiagnostics: () => ipcRenderer.invoke('copy-diagnostics'),
-    openLogFolder: () => ipcRenderer.invoke('open-log-folder')
+    openLogFolder: () => ipcRenderer.invoke('open-log-folder'),
+    onUpdateStatus: callback => ipcRenderer.on('update-status', (_event, status) => callback(status)),
+    onUpdateRequired: callback => ipcRenderer.on('update-required', (_event, info) => callback(info)),
+    installUpdate: () => ipcRenderer.invoke('install-update'),
+    checkForUpdates: () => ipcRenderer.invoke('check-for-updates')
 });
  
